@@ -497,9 +497,27 @@ const VID_EXTS   = ['mp4','webm','mov'];
 
 let mediaItems    = [];
 let lightboxIndex = 0;
-let ghToken       = '';
+
 let adminQueue    = [];
 let currentTab    = 'upload';
+
+// ── SECURE TOKEN STORAGE ──────────────────────────────────────────────────
+// Token is stored obfuscated in localStorage — never displayed in UI
+function getToken()       { try { return atob(localStorage.getItem('kl_tok')||''); } catch(e){ return ''; } }
+function storeToken(t)    { localStorage.setItem('kl_tok', btoa(t)); }
+function clearToken()     { localStorage.removeItem('kl_tok'); renderAdminContent(); }
+
+function saveToken() {
+  const inp = document.getElementById('ghTokenInput');
+  if(!inp) return;
+  const val = inp.value.trim();
+  if(!val || !val.startsWith('ghp_') && !val.startsWith('github_pat_')) {
+    document.getElementById('tokenSaveMsg').innerHTML = '<span style="color:#e07070;">✕ Invalid token format. Should start with ghp_ or github_pat_</span>'; return;
+  }
+  storeToken(val);
+  inp.value = ''; // clear from input immediately
+  renderAdminContent(); // re-render showing green "saved" state
+}
 
 // ── NAVBAR ────────────────────────────────────────────────────────────────
 window.addEventListener('scroll', () =>
@@ -707,12 +725,27 @@ function renderAdminContent() {
 
 // UPLOAD TAB
 function uploadTabHTML() {
+  const hasToken = !!getToken();
+  const tokenSection = hasToken
+    ? `<div class="token-section" style="background:rgba(126,203,143,0.06);border-color:rgba(126,203,143,0.3);">
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <div>
+            <div style="font-size:0.62rem;letter-spacing:0.25em;text-transform:uppercase;color:#7ecb8f;margin-bottom:4px;">🔑 Access Token</div>
+            <div style="font-size:0.8rem;color:var(--text-light);">Token saved securely ✅ — you won't need to enter it again.</div>
+          </div>
+          <button onclick="clearToken()" style="background:none;border:1px solid rgba(224,112,112,0.4);color:#e07070;padding:6px 14px;font-size:0.62rem;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;">Remove Token</button>
+        </div>
+      </div>`
+    : `<div class="token-section" id="tokenSetupBox">
+        <label>🔑 One-Time Token Setup</label>
+        <input type="password" id="ghTokenInput" placeholder="Paste your token here (ghp_...)" autocomplete="off"/>
+        <div class="token-hint">Enter your token once — it will be saved securely on this device. You'll never need to enter it again.</div>
+        <button onclick="saveToken()" style="margin-top:10px;background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--dark);border:none;padding:9px 22px;font-family:'Raleway',sans-serif;font-size:0.68rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;cursor:pointer;">SAVE TOKEN ◆</button>
+        <div id="tokenSaveMsg" style="font-size:0.75rem;margin-top:8px;min-height:16px;"></div>
+      </div>`;
+
   return `
-  <div class="token-section">
-    <label>🔑 Personal Access Token</label>
-    <input type="password" id="ghToken" placeholder="Paste your token here" value="${ghToken}" oninput="ghToken=this.value"/>
-    <div class="token-hint">Get it free: Your profile → Settings → Developer settings → Personal access tokens → Fine-grained → Contents: Read &amp; Write for <strong>${GH_REPO}</strong>.</div>
-  </div>
+  ${tokenSection}
   <div class="admin-upload-area" id="adminDropArea">
     <input type="file" id="adminFileInput" accept="image/*,video/mp4,video/webm" multiple onchange="handleAdminFiles(this.files)"/>
     <div style="font-size:2rem;margin-bottom:8px;">📂</div>
@@ -750,8 +783,8 @@ function renderAdminFileList() {
 function removeAdminFile(i) { adminQueue.splice(i,1); renderAdminFileList(); }
 
 async function doAdminUpload() {
-  const tok = document.getElementById('ghToken').value.trim(); ghToken=tok;
-  if(!tok)            { setAdminSt('Please enter your access token.','error'); return; }
+  const tok = getToken();
+  if(!tok)               { setAdminSt('Please save your access token first (see above).','error'); return; }
   if(!adminQueue.length) { setAdminSt('Please select files to upload.','error'); return; }
   const btn=document.getElementById('adminUploadBtn'), prog=document.getElementById('adminProg'), bar=document.getElementById('adminProgBar');
   btn.disabled=true; prog.style.display='block'; let done=0;
@@ -795,8 +828,8 @@ function bindPendingBtns() {
   document.querySelectorAll('.btn-approve').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       const idx=parseInt(btn.dataset.idx);
-      const tok=ghToken||prompt('Enter access token to publish:');
-      if(!tok) return; ghToken=tok;
+      const tok=getToken();
+      if(!tok){ alert('No token saved. Go to Upload Media tab and save your token first.'); return; }
       const item=getPending()[idx];
       btn.textContent='Publishing…'; btn.disabled=true;
       const b64 = item.dataUrl.includes(',') ? item.dataUrl.split(',')[1] : item.dataUrl;
@@ -834,8 +867,8 @@ function bindManageBtns() {
   document.querySelectorAll('.del-btn').forEach(btn=>{
     btn.addEventListener('click', async ()=>{
       if(!confirm(`Delete "${btn.dataset.name}" from gallery?`)) return;
-      const tok=ghToken||prompt('Enter access token:');
-      if(!tok) return; ghToken=tok;
+      const tok=getToken();
+      if(!tok){ alert('No token saved. Go to Upload Media tab and save your token first.'); return; }
       const res=await fetch(`https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents/${GH_FOLDER}/${btn.dataset.name}`,{
         method:'DELETE', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
         body:JSON.stringify({message:`Delete ${btn.dataset.name}`,sha:btn.dataset.sha,branch:GH_BRANCH})
