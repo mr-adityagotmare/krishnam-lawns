@@ -1,0 +1,35 @@
+{
+  "token": "",
+  "siteData": {
+    "yearsExp": "15+",
+    "eventsCount": "2500+",
+    "capacity": "5000",
+    "phone": "8888883587",
+    "whatsapp": "918888883587",
+    "address": "Outer Ring Rd, Hudkeshwar, Nagpur, Maharashtra 440037",
+    "hours": "Monday – Sunday, 9:00 AM – 9:00 PM",
+    "heroSub": "Where Every Celebration Becomes a Timeless Memory",
+    "aboutP1": "Nestled on the Outer Ring Road, Hudkeshwar, Krishnam Lawns & Banquets has been Nagpur's premier destination for weddings, receptions, and grand events. We blend timeless elegance with modern luxury to create unforgettable moments.",
+    "aboutP2": "Our sprawling venue and dedicated team ensure every detail — from décor to cuisine — is curated with perfection, making your special day truly extraordinary.",
+    "reviews": [
+      {
+        "name": "Rajesh Sharma",
+        "event": "Wedding Ceremony · Jan 2024",
+        "avatar": "👨",
+        "text": "Krishnam Lawns transformed our daughter's wedding into a fairy tale. The décor, the food, and the hospitality were simply beyond our expectations. Every guest was amazed!"
+      },
+      {
+        "name": "Sunita & Anil Deshmukh",
+        "event": "Anniversary · Mar 2024",
+        "avatar": "👩",
+        "text": "We hosted our silver anniversary here and it was an evening we'll cherish forever. The staff went above and beyond. The open lawn at night was absolutely magical!"
+      },
+      {
+        "name": "Priya Mehta",
+        "event": "Corporate Gala · Nov 2023",
+        "avatar": "👔",
+        "text": "Our company's annual gala at Krishnam was a massive success. Professional setup, excellent catering, and the banquet hall looked stunning. Highly recommend!"
+      }
+    ]
+  }
+}
