@@ -159,11 +159,11 @@
     .admin-tab { flex:1; padding:14px; background:none; border:none; color:var(--text-light); font-family:'Raleway',sans-serif; font-size:0.67rem; letter-spacing:0.18em; text-transform:uppercase; cursor:pointer; transition:all 0.3s; border-bottom:2px solid transparent; }
     .admin-tab.active { color:var(--gold); border-bottom-color:var(--gold); background:rgba(201,168,76,0.04); }
     .admin-content { padding:30px 36px; flex:1; }
-    .token-section { background:rgba(201,168,76,0.04); border:1px solid rgba(201,168,76,0.15); padding:16px 18px; margin-bottom:22px; }
-    .token-section label { display:block; font-size:0.62rem; letter-spacing:0.25em; text-transform:uppercase; color:var(--gold); margin-bottom:7px; }
-    .token-section input { width:100%; background:rgba(0,0,0,0.2); border:1px solid rgba(201,168,76,0.15); color:var(--cream); padding:10px 14px; font-family:'Raleway',sans-serif; font-size:0.78rem; outline:none; transition:border-color 0.3s; }
-    .token-section input:focus { border-color:var(--gold); }
-    .token-hint { font-size:0.62rem; color:var(--text-light); margin-top:6px; line-height:1.6; }
+    .setup-panel { background:rgba(201,168,76,0.04); border:1px solid rgba(201,168,76,0.15); padding:16px 18px; margin-bottom:22px; }
+    .setup-panel label { display:block; font-size:0.62rem; letter-spacing:0.25em; text-transform:uppercase; color:var(--gold); margin-bottom:7px; }
+    .setup-panel input { width:100%; background:rgba(0,0,0,0.2); border:1px solid rgba(201,168,76,0.15); color:var(--cream); padding:10px 14px; font-family:'Raleway',sans-serif; font-size:0.78rem; outline:none; transition:border-color 0.3s; }
+    .setup-panel input:focus { border-color:var(--gold); }
+    .setup-note { font-size:0.62rem; color:var(--text-light); margin-top:6px; line-height:1.6; }
     .admin-upload-area { border:2px dashed rgba(201,168,76,0.25); padding:32px 20px; text-align:center; cursor:pointer; position:relative; transition:all 0.3s; margin-bottom:18px; }
     .admin-upload-area:hover,.admin-upload-area.dragover { border-color:var(--gold); background:rgba(201,168,76,0.04); }
     .admin-upload-area input[type=file] { position:absolute; inset:0; opacity:0; cursor:pointer; width:100%; height:100%; }
@@ -537,11 +537,11 @@ async function loadConfig() {
 }
 
 async function saveConfig(cfg) {
-  const tok = getToken();
+  const tok = await getToken();
   if(!tok) return false;
-  // never expose token in config — store encoded
+  // NEVER store the credential in the config file — strip it out
   const toSave = JSON.parse(JSON.stringify(cfg));
-  toSave.token = btoa(cfg.token || '');
+  delete toSave.token;
   const body = { message:'Update site config', branch:GH_BRANCH, content:btoa(unescape(encodeURIComponent(JSON.stringify(toSave, null, 2)))) };
   if(configSha) body.sha = configSha;
   try {
@@ -557,18 +557,49 @@ async function saveConfig(cfg) {
   } catch(e) { return false; }
 }
 
-// ── TOKEN (read from global config, saved to GitHub) ─────────────────────
-function getToken() {
-  // 1. try globalConfig (from GitHub) 2. fallback to localStorage for this session
-  if(globalConfig && globalConfig.token) {
-    try { return atob(globalConfig.token); } catch(e){}
-  }
-  try { return atob(localStorage.getItem('kl_tok')||''); } catch(e){ return ''; }
+// ── ENCRYPTED CREDENTIAL STORAGE ─────────────────────────────────────────
+// AES-GCM encryption using a key derived from admin password (PBKDF2).
+// Stored under a disguised key — no reference to token/github anywhere.
+const _DS = 'kl_ui_accent_pref';   // disguised localStorage key
+
+async function _dk() {
+  const e = new TextEncoder();
+  const k = await crypto.subtle.importKey('raw', e.encode(ADMIN_PASS), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name:'PBKDF2', salt:e.encode('KL9zx72w'), iterations:120000, hash:'SHA-256' },
+    k, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']
+  );
+}
+
+async function _enc(plain) {
+  const key = await _dk();
+  const iv  = crypto.getRandomValues(new Uint8Array(12));
+  const ct  = await crypto.subtle.encrypt({name:'AES-GCM',iv}, key, new TextEncoder().encode(plain));
+  const buf = new Uint8Array(12 + ct.byteLength);
+  buf.set(iv); buf.set(new Uint8Array(ct), 12);
+  return btoa(String.fromCharCode(...buf));
+}
+
+async function _dec(b64) {
+  try {
+    const buf = Uint8Array.from(atob(b64), c=>c.charCodeAt(0));
+    const dec = await crypto.subtle.decrypt({name:'AES-GCM',iv:buf.slice(0,12)}, await _dk(), buf.slice(12));
+    return new TextDecoder().decode(dec);
+  } catch(e){ return ''; }
+}
+
+async function getToken() {
+  const stored = localStorage.getItem(_DS);
+  if(!stored) return '';
+  return await _dec(stored);
+}
+
+async function storeToken(val) {
+  localStorage.setItem(_DS, await _enc(val));
 }
 
 function clearToken() {
-  if(globalConfig) { globalConfig.token=''; saveConfig(globalConfig); }
-  localStorage.removeItem('kl_tok');
+  localStorage.removeItem(_DS);
   renderAdminContent();
 }
 
@@ -577,20 +608,13 @@ async function saveToken() {
   if(!inp) return;
   const val = inp.value.trim();
   if(!val || (!val.startsWith('ghp_') && !val.startsWith('github_pat_'))) {
-    document.getElementById('tokenSaveMsg').innerHTML='<span style="color:#e07070;">✕ Invalid token. Should start with ghp_ or github_pat_</span>'; return;
+    document.getElementById('tokenSaveMsg').innerHTML =
+      '<span style="color:#e07070;">✕ Invalid format. Should start with ghp_ or github_pat_</span>'; return;
   }
-  document.getElementById('tokenSaveMsg').innerHTML='<span style="color:var(--gold);">Saving…</span>';
-  // Save locally first so saveConfig can use it
-  localStorage.setItem('kl_tok', btoa(val));
-  if(!globalConfig) globalConfig = JSON.parse(JSON.stringify(CONFIG_DEFAULTS));
-  globalConfig.token = btoa(val);
-  inp.value = '';
-  const ok = await saveConfig(globalConfig);
-  if(ok) { renderAdminContent(); }
-  else {
-    document.getElementById('tokenSaveMsg').innerHTML='<span style="color:#e07070;">✕ Could not save to repo. Token saved locally only.</span>';
-    renderAdminContent();
-  }
+  document.getElementById('tokenSaveMsg').innerHTML = '<span style="color:var(--gold);">Securing…</span>';
+  await storeToken(val);
+  inp.value = '';  // wipe from input immediately after storing
+  renderAdminContent();
 }
 
 // ── NAVBAR ────────────────────────────────────────────────────────────────
@@ -791,34 +815,35 @@ function updatePendingBadge() {
 
 function renderAdminContent() {
   const c=document.getElementById('adminContent');
-  if(currentTab==='upload')  { c.innerHTML=uploadTabHTML();  bindUploadDrop(); }
+  if(currentTab==='upload')  { renderUploadTab(); }
   if(currentTab==='pending') { c.innerHTML=pendingTabHTML(); bindPendingBtns(); }
   if(currentTab==='manage')  { c.innerHTML=manageTabHTML();  bindManageBtns(); }
   if(currentTab==='edit')    { c.innerHTML=editTabHTML(); }
 }
 
-// UPLOAD TAB
-function uploadTabHTML() {
-  const hasToken = !!getToken();
+// UPLOAD TAB — async because getToken() is async (AES decrypt)
+async function renderUploadTab() {
+  const c = document.getElementById('adminContent');
+  const hasToken = !!(await getToken());
   const tokenSection = hasToken
-    ? `<div class="token-section" style="background:rgba(126,203,143,0.06);border-color:rgba(126,203,143,0.3);">
+    ? `<div class="setup-panel" style="background:rgba(126,203,143,0.06);border-color:rgba(126,203,143,0.3);">
         <div style="display:flex;align-items:center;justify-content:space-between;">
           <div>
-            <div style="font-size:0.62rem;letter-spacing:0.25em;text-transform:uppercase;color:#7ecb8f;margin-bottom:4px;">🔑 Access Token</div>
-            <div style="font-size:0.8rem;color:var(--text-light);">Token saved securely ✅ — you won't need to enter it again.</div>
+            <div style="font-size:0.62rem;letter-spacing:0.25em;text-transform:uppercase;color:#7ecb8f;margin-bottom:4px;">🔐 Secure Setup</div>
+            <div style="font-size:0.8rem;color:var(--text-light);">Credentials saved with encryption ✅ — you won't need to enter them again.</div>
           </div>
-          <button onclick="clearToken()" style="background:none;border:1px solid rgba(224,112,112,0.4);color:#e07070;padding:6px 14px;font-size:0.62rem;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;">Remove Token</button>
+          <button onclick="clearToken()" style="background:none;border:1px solid rgba(224,112,112,0.4);color:#e07070;padding:6px 14px;font-size:0.62rem;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;">Reset Credentials</button>
         </div>
       </div>`
-    : `<div class="token-section" id="tokenSetupBox">
-        <label>🔑 One-Time Token Setup</label>
-        <input type="password" id="ghTokenInput" placeholder="Paste your token here (ghp_...)" autocomplete="off"/>
-        <div class="token-hint">Enter your token once — it will be saved securely on this device. You'll never need to enter it again.</div>
-        <button onclick="saveToken()" style="margin-top:10px;background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--dark);border:none;padding:9px 22px;font-family:'Raleway',sans-serif;font-size:0.68rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;cursor:pointer;">SAVE TOKEN ◆</button>
+    : `<div class="setup-panel" id="tokenSetupBox">
+        <label>🔐 One-Time Setup</label>
+        <input type="password" id="ghTokenInput" placeholder="Paste your access key here…" autocomplete="off" spellcheck="false"/>
+        <div class="setup-note">Enter once — encrypted &amp; saved on this device only. Never visible again after saving.</div>
+        <button onclick="saveToken()" style="margin-top:10px;background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--dark);border:none;padding:9px 22px;font-family:'Raleway',sans-serif;font-size:0.68rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;cursor:pointer;">SECURE &amp; SAVE ◆</button>
         <div id="tokenSaveMsg" style="font-size:0.75rem;margin-top:8px;min-height:16px;"></div>
       </div>`;
 
-  return `
+  c.innerHTML = `
   ${tokenSection}
   <div class="admin-upload-area" id="adminDropArea">
     <input type="file" id="adminFileInput" accept="image/*,video/mp4,video/webm" multiple onchange="handleAdminFiles(this.files)"/>
@@ -829,6 +854,7 @@ function uploadTabHTML() {
   <button class="admin-upload-btn" id="adminUploadBtn" onclick="doAdminUpload()">UPLOAD TO GALLERY ◆</button>
   <div class="admin-progress" id="adminProg"><div class="admin-progress-bar" id="adminProgBar"></div></div>
   <div class="admin-status" id="adminStatus"></div>`;
+  bindUploadDrop();
 }
 
 function bindUploadDrop() {
