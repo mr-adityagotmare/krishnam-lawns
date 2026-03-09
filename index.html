@@ -490,33 +490,107 @@ const GH_USER    = 'mr-adityagotmare';
 const GH_REPO    = 'krishnam-lawns';
 const GH_BRANCH  = 'main';
 const GH_FOLDER  = 'gallery';
+const GH_CONFIG  = 'config.json';   // global config file in repo root
 const ADMIN_PASS = 'Krishnam@8888883587';
 const IMG_EXTS   = ['jpg','jpeg','png','webp','gif','avif'];
 const VID_EXTS   = ['mp4','webm','mov'];
+const RAW_BASE   = `https://raw.githubusercontent.com/${GH_USER}/${GH_REPO}/${GH_BRANCH}`;
+const API_BASE   = `https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents`;
 // ─────────────────────────────────────────────────────────────────────────
 
 let mediaItems    = [];
 let lightboxIndex = 0;
-
 let adminQueue    = [];
 let currentTab    = 'upload';
+let configSha     = null;   // sha of config.json for updates
+let globalConfig  = null;   // cached config loaded from GitHub
 
-// ── SECURE TOKEN STORAGE ──────────────────────────────────────────────────
-// Token is stored obfuscated in localStorage — never displayed in UI
-function getToken()       { try { return atob(localStorage.getItem('kl_tok')||''); } catch(e){ return ''; } }
-function storeToken(t)    { localStorage.setItem('kl_tok', btoa(t)); }
-function clearToken()     { localStorage.removeItem('kl_tok'); renderAdminContent(); }
+// ── GLOBAL CONFIG (GitHub-backed, syncs all devices) ─────────────────────
+const CONFIG_DEFAULTS = {
+  token: '',   // stored encoded
+  siteData: {
+    yearsExp:'15+', eventsCount:'2500+', capacity:'5000',
+    phone:'8888883587', whatsapp:'918888883587',
+    address:'Outer Ring Rd, Hudkeshwar, Nagpur, Maharashtra 440037',
+    hours:'Monday – Sunday, 9:00 AM – 9:00 PM',
+    heroSub:'Where Every Celebration Becomes a Timeless Memory',
+    aboutP1:'Nestled on the Outer Ring Road, Hudkeshwar, Krishnam Lawns & Banquets has been Nagpur\'s premier destination for weddings, receptions, and grand events. We blend timeless elegance with modern luxury to create unforgettable moments.',
+    aboutP2:'Our sprawling venue and dedicated team ensure every detail — from décor to cuisine — is curated with perfection, making your special day truly extraordinary.',
+    reviews:[
+      {name:'Rajesh Sharma', event:'Wedding Ceremony · Jan 2024', avatar:'👨', text:'Krishnam Lawns transformed our daughter\'s wedding into a fairy tale. The décor, the food, and the hospitality were simply beyond our expectations. Every guest was amazed!'},
+      {name:'Sunita & Anil Deshmukh', event:'Anniversary · Mar 2024', avatar:'👩', text:'We hosted our silver anniversary here and it was an evening we\'ll cherish forever. The staff went above and beyond. The open lawn at night was absolutely magical!'},
+      {name:'Priya Mehta', event:'Corporate Gala · Nov 2023', avatar:'👔', text:'Our company\'s annual gala at Krishnam was a massive success. Professional setup, excellent catering, and the banquet hall looked stunning. Highly recommend!'}
+    ]
+  }
+};
 
-function saveToken() {
+async function loadConfig() {
+  try {
+    const res = await fetch(`${API_BASE}/${GH_CONFIG}?ref=${GH_BRANCH}&t=${Date.now()}`);
+    if (!res.ok) { globalConfig = JSON.parse(JSON.stringify(CONFIG_DEFAULTS)); return; }
+    const file = await res.json();
+    configSha   = file.sha;
+    globalConfig = JSON.parse(atob(file.content.replace(/\n/g,'')));
+  } catch(e) {
+    globalConfig = JSON.parse(JSON.stringify(CONFIG_DEFAULTS));
+  }
+}
+
+async function saveConfig(cfg) {
+  const tok = getToken();
+  if(!tok) return false;
+  // never expose token in config — store encoded
+  const toSave = JSON.parse(JSON.stringify(cfg));
+  toSave.token = btoa(cfg.token || '');
+  const body = { message:'Update site config', branch:GH_BRANCH, content:btoa(unescape(encodeURIComponent(JSON.stringify(toSave, null, 2)))) };
+  if(configSha) body.sha = configSha;
+  try {
+    const res = await fetch(`${API_BASE}/${GH_CONFIG}`, {
+      method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    if(!res.ok) return false;
+    const data = await res.json();
+    configSha = data.content.sha;
+    globalConfig = cfg;
+    return true;
+  } catch(e) { return false; }
+}
+
+// ── TOKEN (read from global config, saved to GitHub) ─────────────────────
+function getToken() {
+  // 1. try globalConfig (from GitHub) 2. fallback to localStorage for this session
+  if(globalConfig && globalConfig.token) {
+    try { return atob(globalConfig.token); } catch(e){}
+  }
+  try { return atob(localStorage.getItem('kl_tok')||''); } catch(e){ return ''; }
+}
+
+function clearToken() {
+  if(globalConfig) { globalConfig.token=''; saveConfig(globalConfig); }
+  localStorage.removeItem('kl_tok');
+  renderAdminContent();
+}
+
+async function saveToken() {
   const inp = document.getElementById('ghTokenInput');
   if(!inp) return;
   const val = inp.value.trim();
-  if(!val || !val.startsWith('ghp_') && !val.startsWith('github_pat_')) {
-    document.getElementById('tokenSaveMsg').innerHTML = '<span style="color:#e07070;">✕ Invalid token format. Should start with ghp_ or github_pat_</span>'; return;
+  if(!val || (!val.startsWith('ghp_') && !val.startsWith('github_pat_'))) {
+    document.getElementById('tokenSaveMsg').innerHTML='<span style="color:#e07070;">✕ Invalid token. Should start with ghp_ or github_pat_</span>'; return;
   }
-  storeToken(val);
-  inp.value = ''; // clear from input immediately
-  renderAdminContent(); // re-render showing green "saved" state
+  document.getElementById('tokenSaveMsg').innerHTML='<span style="color:var(--gold);">Saving…</span>';
+  // Save locally first so saveConfig can use it
+  localStorage.setItem('kl_tok', btoa(val));
+  if(!globalConfig) globalConfig = JSON.parse(JSON.stringify(CONFIG_DEFAULTS));
+  globalConfig.token = btoa(val);
+  inp.value = '';
+  const ok = await saveConfig(globalConfig);
+  if(ok) { renderAdminContent(); }
+  else {
+    document.getElementById('tokenSaveMsg').innerHTML='<span style="color:#e07070;">✕ Could not save to repo. Token saved locally only.</span>';
+    renderAdminContent();
+  }
 }
 
 // ── NAVBAR ────────────────────────────────────────────────────────────────
@@ -884,31 +958,12 @@ function fileToBase64(file) {
   return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(',')[1]); r.onerror=rej; r.readAsDataURL(file); });
 }
 
-// ── SITE DATA (editable content) ─────────────────────────────────────────
-const SITE_DEFAULTS = {
-  yearsExp:    '15+',
-  eventsCount: '2500+',
-  capacity:    '5000',
-  phone:       '8888883587',
-  whatsapp:    '918888883587',
-  address:     'Outer Ring Rd, Hudkeshwar, Nagpur, Maharashtra 440037',
-  hours:       'Monday – Sunday, 9:00 AM – 9:00 PM',
-  heroTitle:   'Krishnam Lawns & Banquets',
-  heroSub:     'Where Every Celebration Becomes a Timeless Memory',
-  aboutP1:     'Nestled on the Outer Ring Road, Hudkeshwar, Krishnam Lawns & Banquets has been Nagpur\'s premier destination for weddings, receptions, and grand events. We blend timeless elegance with modern luxury to create unforgettable moments.',
-  aboutP2:     'Our sprawling venue and dedicated team ensure every detail — from décor to cuisine — is curated with perfection, making your special day truly extraordinary.',
-  reviews: [
-    { name:'Rajesh Sharma',  event:'Wedding Ceremony · Jan 2024', avatar:'👨', text:'Krishnam Lawns transformed our daughter\'s wedding into a fairy tale. The décor, the food, and the hospitality were simply beyond our expectations. Every guest was amazed!' },
-    { name:'Sunita & Anil Deshmukh', event:'Anniversary · Mar 2024', avatar:'👩', text:'We hosted our silver anniversary here and it was an evening we\'ll cherish forever. The staff went above and beyond. The open lawn at night was absolutely magical!' },
-    { name:'Priya Mehta',    event:'Corporate Gala · Nov 2023', avatar:'👔', text:'Our company\'s annual gala at Krishnam was a massive success. Professional setup, excellent catering, and the banquet hall looked stunning. Highly recommend!' }
-  ]
-};
-
+// ── SITE DATA (read/write to GitHub config.json) ─────────────────────────
 function getSiteData() {
-  try { return Object.assign({}, SITE_DEFAULTS, JSON.parse(localStorage.getItem('kl_sitedata') || '{}')); }
-  catch(e) { return Object.assign({}, SITE_DEFAULTS); }
+  if(globalConfig && globalConfig.siteData)
+    return Object.assign({}, CONFIG_DEFAULTS.siteData, globalConfig.siteData);
+  return JSON.parse(JSON.stringify(CONFIG_DEFAULTS.siteData));
 }
-function saveSiteData(d) { localStorage.setItem('kl_sitedata', JSON.stringify(d)); }
 
 function applySiteData() {
   const d = getSiteData();
@@ -1026,34 +1081,48 @@ function editTabHTML() {
 
 function esc(str) { return String(str||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-function saveEdits() {
+async function saveEdits() {
+  const btn = document.querySelector('.ed-save');
+  const savedEl = document.getElementById('edSaved');
+  if(btn) { btn.textContent='Saving…'; btn.disabled=true; }
+
   const d = getSiteData();
-  d.yearsExp    = document.getElementById('ed_yearsExp').value.trim()    || d.yearsExp;
-  d.eventsCount = document.getElementById('ed_eventsCount').value.trim() || d.eventsCount;
-  d.capacity    = document.getElementById('ed_capacity').value.trim()    || d.capacity;
-  d.phone       = document.getElementById('ed_phone').value.trim()       || d.phone;
-  d.whatsapp    = document.getElementById('ed_whatsapp').value.trim()    || d.whatsapp;
-  d.address     = document.getElementById('ed_address').value.trim()     || d.address;
-  d.hours       = document.getElementById('ed_hours').value.trim()       || d.hours;
-  d.heroSub     = document.getElementById('ed_heroSub').value.trim()     || d.heroSub;
-  d.aboutP1     = document.getElementById('ed_aboutP1').value.trim()     || d.aboutP1;
-  d.aboutP2     = document.getElementById('ed_aboutP2').value.trim()     || d.aboutP2;
+  d.yearsExp    = document.getElementById('ed_yearsExp')?.value.trim()    || d.yearsExp;
+  d.eventsCount = document.getElementById('ed_eventsCount')?.value.trim() || d.eventsCount;
+  d.capacity    = document.getElementById('ed_capacity')?.value.trim()    || d.capacity;
+  d.phone       = document.getElementById('ed_phone')?.value.trim()       || d.phone;
+  d.whatsapp    = document.getElementById('ed_whatsapp')?.value.trim()    || d.whatsapp;
+  d.address     = document.getElementById('ed_address')?.value.trim()     || d.address;
+  d.hours       = document.getElementById('ed_hours')?.value.trim()       || d.hours;
+  d.heroSub     = document.getElementById('ed_heroSub')?.value.trim()     || d.heroSub;
+  d.aboutP1     = document.getElementById('ed_aboutP1')?.value.trim()     || d.aboutP1;
+  d.aboutP2     = document.getElementById('ed_aboutP2')?.value.trim()     || d.aboutP2;
   d.reviews = d.reviews.map((r,i) => ({
     ...r,
     name:  document.getElementById(`rev_name_${i}`)?.value.trim()  || r.name,
     event: document.getElementById(`rev_event_${i}`)?.value.trim() || r.event,
     text:  document.getElementById(`rev_text_${i}`)?.value.trim()  || r.text,
   }));
-  saveSiteData(d);
+
+  if(!globalConfig) globalConfig = JSON.parse(JSON.stringify(CONFIG_DEFAULTS));
+  globalConfig.siteData = d;
+  const ok = await saveConfig(globalConfig);
+
+  if(btn) { btn.textContent='✦ SAVE & APPLY ALL CHANGES'; btn.disabled=false; }
   applySiteData();
-  const saved = document.getElementById('edSaved');
-  saved.classList.add('show');
-  setTimeout(() => saved.classList.remove('show'), 3000);
+  if(savedEl) {
+    savedEl.textContent = ok ? '✅ Saved & live on all devices!' : '⚠️ Saved locally (check token)';
+    savedEl.classList.add('show');
+    setTimeout(() => savedEl.classList.remove('show'), 3500);
+  }
 }
 
 // ── INIT ──────────────────────────────────────────────────────────────────
-loadGallery();
-applySiteData();
+(async function init() {
+  await loadConfig();   // fetch config.json from GitHub (token + siteData)
+  applySiteData();      // apply globally synced content immediately
+  loadGallery();        // load gallery images
+})();
 </script>
 </body>
 </html>
