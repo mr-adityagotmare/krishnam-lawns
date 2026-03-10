@@ -1620,6 +1620,8 @@ async function deleteInvitation(slug) {
 }
 
 async function createInvitation() {
+  const btn = document.getElementById('invCreateBtn');
+  try {
   const bride       = document.getElementById('inv_bride').value.trim();
   const groom       = document.getElementById('inv_groom').value.trim();
   const brideFam    = document.getElementById('inv_bride_family').value.trim();
@@ -1639,9 +1641,8 @@ async function createInvitation() {
     setInvStatus('Please fill in Bride, Groom, Date, Venue and URL slug.','error'); return;
   }
   const tok = await getToken();
-  if(!tok) { setInvStatus('No access key saved. Go to Upload Media tab first.','error'); return; }
+  if(!tok) { setInvStatus('No access key — go to Upload Media tab and save your GitHub token first.','error'); return; }
 
-  const btn = document.getElementById('invCreateBtn');
   btn.disabled = true; btn.textContent = 'Publishing…';
   setInvStatus('Generating invitation card…','');
 
@@ -1662,12 +1663,27 @@ async function createInvitation() {
   const uploadBody = { message:'Create invitation: '+slug, branch:GH_BRANCH, content:btoa(unescape(encodeURIComponent(invHtml))) };
   if(existingSha) uploadBody.sha = existingSha;
 
-  const res = await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.html', {
-    method:'PUT', headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
-    body:JSON.stringify(uploadBody)
-  });
+  let res, resJson;
+  try {
+    res = await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.html', {
+      method:'PUT', headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
+      body:JSON.stringify(uploadBody)
+    });
+    resJson = await res.clone().json().catch(()=>({}));
+  } catch(netErr) {
+    setInvStatus('✕ Network error — check internet connection. ('+netErr.message+')','error');
+    btn.disabled=false; btn.textContent='✦ GENERATE & PUBLISH INVITATION'; return;
+  }
 
-  if(!res.ok) { setInvStatus('✕ Failed to publish. Check your access key.','error'); btn.disabled=false; btn.textContent='✦ GENERATE & PUBLISH INVITATION'; return; }
+  if(!res.ok) {
+    const reason = resJson.message || ('HTTP '+res.status);
+    let hint = '';
+    if(res.status===401||res.status===403) hint = '<br>👉 GitHub token missing, expired or lacks <b>Contents: Write</b> permission. Re-enter it in the Upload Media tab.';
+    else if(res.status===404) hint = '<br>👉 Repo or branch not found. Verify GH_USER / GH_REPO / GH_BRANCH.';
+    else if(res.status===422) hint = '<br>👉 SHA conflict — try a different URL slug, or re-publish the same slug.';
+    setInvStatus('✕ Failed to publish: <i>'+reason+'</i>'+hint,'error');
+    btn.disabled=false; btn.textContent='✦ GENERATE & PUBLISH INVITATION'; return;
+  }
 
   // Generate + upload PDF
   setInvStatus('Generating PDF…','');
@@ -1691,6 +1707,10 @@ async function createInvitation() {
   );
   btn.disabled=false; btn.textContent='✦ GENERATE & PUBLISH INVITATION';
   setTimeout(renderInvitesTab, 1800);
+  } catch(unexpectedErr) {
+    setInvStatus('✕ Unexpected error: '+unexpectedErr.message,'error');
+    if(btn){ btn.disabled=false; btn.textContent='✦ GENERATE & PUBLISH INVITATION'; }
+  }
 }
 
 // ── PDF GENERATION ────────────────────────────────────────────────────────
