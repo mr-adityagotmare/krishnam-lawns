@@ -1845,7 +1845,7 @@ async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, 
           'return qrcode;'
         );
         var qrLib = lib();
-        var q = new qrLib.QRCode(0, 1); // type auto, EC level M
+        var q = new qrLib.QRCode(0, 2); // type auto, EC level H — tolerates 30% center coverage for the Krishna logo
         q.addData(url);
         q.make();
         var mc = q.getModuleCount();
@@ -1859,9 +1859,51 @@ async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, 
             }
           }
         }
+        // Krishna standing with flute — inline SVG path, centered in QR
+        // EC level H allows up to 30% center coverage without breaking scan
+        var cx = size / 2, cy = size / 2;
+        var logoSize = Math.floor(size * 0.22); // 22% of QR size
+        var lx = cx - logoSize / 2, ly = cy - logoSize / 2;
+
+        // White rounded background circle for the logo
+        var logoBg = '<circle cx="'+cx+'" cy="'+cy+'" r="'+(logoSize*0.62)+'" fill="'+bg2+'" stroke="'+fg+'" stroke-width="1.2"/>';
+
+        // Krishna silhouette: flute-playing pose (tribhanga — triple-bend posture)
+        // Drawn as a single composed SVG path scaled to fit logoSize×logoSize at (lx,ly)
+        var scale = logoSize / 48; // design space is 48×48
+        var tx = lx, ty = ly;
+        var krishna =
+          '<g transform="translate('+tx+','+ty+') scale('+scale+')" fill="'+fg+'">'
+          // peacock feather crown
+          + '<ellipse cx="24" cy="3.5" rx="3" ry="2" opacity="0.9"/>'
+          + '<ellipse cx="20.5" cy="4.5" rx="1.8" ry="1.2" transform="rotate(-20,20.5,4.5)" opacity="0.7"/>'
+          + '<ellipse cx="27.5" cy="4.5" rx="1.8" ry="1.2" transform="rotate(20,27.5,4.5)" opacity="0.7"/>'
+          + '<rect x="23.2" y="2" width="1.6" height="4" rx="0.8"/>'
+          // head
+          + '<ellipse cx="24" cy="9.5" rx="4" ry="4.5"/>'
+          // neck
+          + '<rect x="22.5" y="13.5" width="3" height="2.5" rx="1"/>'
+          // torso (slight lean right — tribhanga)
+          + '<path d="M19.5 16 Q17 22 18 29 Q21 31 24 31 Q27 31 30 29 Q31 22 28.5 16 Z"/>'
+          // right arm up holding flute
+          + '<path d="M28.5 17 Q32 13 36 10 Q37 9.5 37.5 10 Q37 11 36.5 11.5 Q33 14 29.5 18.5 Z"/>'
+          // flute (long diagonal line)
+          + '<rect x="29" y="8" width="10" height="1.4" rx="0.7" transform="rotate(-25,29,8)"/>'
+          // left arm relaxed
+          + '<path d="M19.5 17 Q16 20 15 24 Q14.5 25 15.5 25.5 Q16 24.5 16.5 21 Q18 19 20.5 17.5 Z"/>'
+          // dhoti / lower garment (slight knee bend)
+          + '<path d="M18 29 Q17 35 18.5 42 Q21 44 24 44 Q27 44 29.5 42 Q31 35 30 29 Q27 32 24 32 Q21 32 18 29 Z"/>'
+          // right foot forward
+          + '<ellipse cx="26" cy="44.5" rx="3" ry="1.5" transform="rotate(-10,26,44.5)"/>'
+          // left foot back
+          + '<ellipse cx="21.5" cy="44" rx="2.5" ry="1.4" transform="rotate(8,21.5,44)"/>'
+          + '</g>';
+
         return '<svg xmlns="http://www.w3.org/2000/svg" width="'+size+'" height="'+size+'">'
           + '<rect width="100%" height="100%" fill="'+bg2+'"/>'
           + '<g fill="'+fg+'">' + rects + '</g>'
+          + logoBg
+          + krishna
           + '</svg>';
       } catch(e) {
         console.warn('QR build error:', e.message);
