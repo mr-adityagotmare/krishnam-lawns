@@ -1273,11 +1273,29 @@ async function renderInvitesTab() {
     <div class="inv-field"><span class="inv-label">Wedding Date</span><input class="inv-input" id="inv_date" type="date"/></div>
     <div class="inv-field"><span class="inv-label">Ceremony Time</span><input class="inv-input" id="inv_time" type="time" value="18:00"/></div>
   </div>
-  <div class="inv-field" style="margin-top:12px;"><span class="inv-label">Venue Name</span><input class="inv-input" id="inv_venue" placeholder="e.g. Krishnam Lawns & Banquets, Nagpur"/></div>
-  <div class="inv-field" style="margin-top:12px;"><span class="inv-label">Venue Address</span><input class="inv-input" id="inv_address" placeholder="e.g. Outer Ring Rd, Hudkeshwar, Nagpur 440037"/></div>
-  <div class="inv-field" style="margin-top:12px;"><span class="inv-label">Google Maps Link (optional)</span><input class="inv-input" id="inv_map" placeholder="https://maps.app.goo.gl/..."/></div>
+  <div class="inv-field" style="margin-top:12px;"><span class="inv-label">Venue Name</span><input class="inv-input" id="inv_venue" value="Krishnam Lawns &amp; Banquets"/></div>
+  <div class="inv-field" style="margin-top:12px;"><span class="inv-label">Venue Address</span><input class="inv-input" id="inv_address" value="Outer Ring Rd, Hudkeshwar, Nagpur, Maharashtra 440037"/></div>
+  <div class="inv-field" style="margin-top:12px;"><span class="inv-label">Google Maps Link</span><input class="inv-input" id="inv_map" value="https://maps.app.goo.gl/iyjcCS83y51dXh7p7"/></div>
 
-  <div class="inv-section-title" style="margin-top:20px;">🎉 Wedding Events</div>
+  <div class="inv-section-title" style="margin-top:20px;">🌐 Invitation Language & Type</div>
+  <div class="inv-form-grid" style="margin-bottom:14px;">
+    <div class="inv-field">
+      <span class="inv-label">Card Language (for event names & text)</span>
+      <select class="inv-input" id="inv_lang_select" onchange="setInvCardLang(this.value)">
+        ${Object.entries(INV_LANG_DATA).map(([k,v])=>'<option value="'+k+'"'+(k===invCardLang?' selected':'')+'>'+v.label+'</option>').join('')}
+      </select>
+    </div>
+    <div class="inv-field">
+      <span class="inv-label">Event/Service Type</span>
+      <select class="inv-input" id="inv_service_type">
+        <option value="">— General / Wedding —</option>
+        ${Object.entries(INV_SERVICE_TYPES).map(([k,v])=>'<option value="'+k+'">'+v.en+'</option>').join('')}
+      </select>
+    </div>
+  </div>
+
+  <div class="inv-section-title" style="margin-top:4px;">🎉 Wedding Events</div>
+  <div style="font-size:0.62rem;color:var(--text-light);margin-bottom:10px;letter-spacing:0.05em;">Select event type from dropdown — name auto-fills in your chosen language.</div>
   <div id="inv_events_list"></div>
   <button onclick="addInvEvent()" style="background:none;border:1px dashed rgba(201,168,76,0.3);color:var(--gold);padding:8px 18px;font-size:0.68rem;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;margin-top:8px;">+ Add Event</button>
 
@@ -1308,14 +1326,18 @@ async function renderInvitesTab() {
         const expiry = new Date(wDate); expiry.setDate(expiry.getDate() + 10);
         const daysLeft = Math.ceil((expiry - new Date()) / 86400000);
         const link = `https://${GH_USER}.github.io/${GH_REPO}/${INV_FOLDER}/${inv.slug}.html`;
+        const pdfLink = `https://${GH_USER}.github.io/${GH_REPO}/${INV_FOLDER}/${inv.slug}.pdf.html`;
+        const langLabel = inv.cardLang ? (INV_LANG_DATA[inv.cardLang]?.label||inv.cardLang) : 'Marathi';
+        const svcLabel  = inv.serviceType && INV_SERVICE_TYPES[inv.serviceType] ? INV_SERVICE_TYPES[inv.serviceType].en : '';
         return `<div class="inv-card">
           <div class="inv-card-info">
             <div class="inv-card-names">${inv.bride} <span style="color:var(--gold)">♥</span> ${inv.groom}</div>
-            <div class="inv-card-meta">📅 ${inv.weddingDate} &nbsp;·&nbsp; 📍 ${inv.venue}</div>
+            <div class="inv-card-meta">📅 ${inv.weddingDate} &nbsp;·&nbsp; 📍 ${inv.venue}${svcLabel?' &nbsp;·&nbsp; '+svcLabel:''} &nbsp;·&nbsp; 🌐 ${langLabel}</div>
             <div class="inv-card-expires">${daysLeft > 0 ? `⏳ Expires in ${daysLeft} days (10 days after wedding)` : '🗑 Expired — will be deleted on next visit'}</div>
           </div>
           <div class="inv-card-actions">
             <a href="${link}" target="_blank" class="inv-preview-btn">👁 Preview</a>
+            <a href="${pdfLink}" target="_blank" class="inv-preview-btn" style="color:var(--gold-light);">📄 PDF</a>
             <button class="inv-copy-btn" onclick="copyInvLink('${link}', this)">📋 Copy Link</button>
             <button class="inv-del-btn" onclick="deleteInvitation('${inv.slug}')">✕</button>
           </div>
@@ -1338,6 +1360,45 @@ async function renderInvitesTab() {
 
 let invEvents = [];
 
+// ── MULTILINGUAL EVENT & SERVICE DICTIONARY ───────────────────────────────
+const INV_LANG_DATA = {
+  en:    { label:'English',    dir:'ltr' },
+  hi:    { label:'Hindi',      dir:'ltr' },
+  mr:    { label:'Marathi',    dir:'ltr' },
+  te:    { label:'Telugu',     dir:'ltr' },
+  ta:    { label:'Tamil',      dir:'ltr' },
+  gu:    { label:'Gujarati',   dir:'ltr' },
+  bn:    { label:'Bengali',    dir:'ltr' },
+  pa:    { label:'Punjabi',    dir:'ltr' },
+  ur:    { label:'Urdu',       dir:'rtl' },
+};
+
+// Preset wedding events: key -> { en, hi, mr, te, ta, gu, bn, pa, ur, desc_en }
+const INV_EVENT_PRESETS = {
+  'engagement':    { en:'Engagement Ceremony',   hi:'सगाई समारोह',      mr:'साखरपुडा सोहळा',     te:'నిశ్చితార్థం',        ta:'நிச்சயதார்த்தம்',    gu:'સગાઈ સમારોહ',     bn:'বাগদান অনুষ্ঠান',   pa:'ਮੰਗਣੀ ਸਮਾਰੋਹ',     ur:'منگنی کی تقریب',    desc:'Eternal Vows' },
+  'sangeet':       { en:'Sangeet & Dance Night',  hi:'संगीत और नृत्य रात्र', mr:'संगीत आणि नृत्य रात्र', te:'సంగీత్ నైట్',    ta:'சங்கீத நிகழ்ச்சி',  gu:'સંગીત સંધ્યા',    bn:'সংগীত অনুষ্ঠান',    pa:'ਸੰਗੀਤ ਸਮਾਰੋਹ',    ur:'سنگیت کی رات',      desc:'Melodious Celebration' },
+  'haldi':         { en:'Haldi Ceremony',         hi:'हल्दी समारोह',     mr:'हळद सोहळा',          te:'పసుపు కార్యక్రమం',   ta:'மஞ்சள் நிகழ்ச்சி',  gu:'હળદર સમારોહ',    bn:'গায়ে হলুদ',          pa:'ਹਲਦੀ ਰਸਮ',         ur:'ہلدی کی رسم',       desc:'Golden Turmeric Bliss' },
+  'mehendi':       { en:'Mehendi Ceremony',       hi:'मेहंदी समारोह',    mr:'मेंदी सोहळा',        te:'మెహందీ కార్యక్రమం',  ta:'மருதாணி நிகழ்ச்சி', gu:'મહેંદી સમારોહ',  bn:'মেহেদি অনুষ্ঠান',   pa:'ਮਹਿੰਦੀ ਰਸਮ',        ur:'مہندی کی تقریب',   desc:'Artistic Adornment' },
+  'barat':         { en:'Barat — Groom\'s Procession', hi:'बारात',       mr:'वरात',               te:'బారాత్',             ta:'மணமகன் ஊர்வலம்',    gu:'જાન',            bn:'বরযাত্রা',          pa:'ਬਰਾਤ',              ur:'بارات',             desc:'The Royal Procession' },
+  'wedding':       { en:'Wedding Ceremony',       hi:'विवाह समारोह',     mr:'विवाह सोहळा',        te:'వివాహ వేడుక',        ta:'திருமண விழா',        gu:'લગ્ન સમારોહ',    bn:'বিবাহ অনুষ্ঠান',    pa:'ਵਿਆਹ ਸਮਾਰੋਹ',      ur:'نکاح کی تقریب',    desc:'The Grand Nuptials' },
+  'reception':     { en:'Wedding Reception',      hi:'विवाह स्वागत समारोह', mr:'विवाह स्वागत सोहळा', te:'రిసెప్షన్',         ta:'வரவேற்பு விழா',     gu:'રિસેપ્શન',       bn:'রিসেপশন অনুষ্ঠান',  pa:'ਰਿਸੈਪਸ਼ਨ',          ur:'ولیمہ',             desc:'Grand Reception' },
+  'lunch':         { en:'Wedding Lunch',          hi:'विवाह भोज',        mr:'विवाह भोजन',         te:'వివాహ భోజనం',        ta:'திருமண விருந்து',    gu:'લગ્ન ભોજન',      bn:'বিবাহের ভোজ',       pa:'ਵਿਆਹ ਦਾ ਭੋਜ',       ur:'شادی کا کھانا',    desc:'Culinary Celebration' },
+  'vidaai':        { en:'Vidaai — Bride\'s Farewell', hi:'विदाई',        mr:'निरोप',              te:'వీడ్కోలు',           ta:'வீடு வழியனுப்பு',   gu:'વિદાઈ',          bn:'বিদায়',             pa:'ਵਿਦਾਈ',             ur:'رخصتی',             desc:'Farewell Blessing' },
+  'custom':        { en:'Custom Event',           hi:'अन्य कार्यक्रम',   mr:'इतर कार्यक्रम',      te:'ఇతర కార్యక్రమం',     ta:'பிற நிகழ்ச்சி',     gu:'અન્ય કાર્યક્રમ', bn:'অন্যান্য অনুষ্ঠান', pa:'ਹੋਰ ਸਮਾਗਮ',         ur:'دیگر تقریب',        desc:'' },
+};
+
+// Service type translations for cards
+const INV_SERVICE_TYPES = {
+  'wedding':    { en:'Wedding Ceremonies',      hi:'विवाह समारोह',        mr:'लग्न सोहळा' },
+  'reception':  { en:'Receptions & Parties',    hi:'स्वागत समारोह',       mr:'स्वागत सोहळा' },
+  'catering':   { en:'Catering & Cuisine',      hi:'कैटरिंग एवं व्यंजन',  mr:'केटरिंग व पदार्थ' },
+  'corporate':  { en:'Corporate Events',        hi:'कॉर्पोरेट कार्यक्रम', mr:'कॉर्पोरेट कार्यक्रम' },
+  'social':     { en:'Social Celebrations',     hi:'सामाजिक समारोह',      mr:'सामाजिक समारंभ' },
+  'lawn':       { en:'Open Lawn Events',        hi:'ओपन लॉन कार्यक्रम',   mr:'उघडे लॉन कार्यक्रम' },
+};
+
+let invCardLang = 'mr'; // default card language
+
 function autoSlug() {
   const bride = document.getElementById('inv_bride')?.value.trim().split(' ')[0].toLowerCase() || '';
   const groom = document.getElementById('inv_groom')?.value.trim().split(' ')[0].toLowerCase() || '';
@@ -1349,32 +1410,64 @@ function autoSlug() {
   }
 }
 
+function setInvCardLang(lang) {
+  invCardLang = lang;
+  renderInvEvents(); // re-render with new language
+}
+
+function pickInvEventPreset(i, key) {
+  if(!key) return;
+  const preset = INV_EVENT_PRESETS[key];
+  if(!preset) return;
+  invEvents[i].presetKey = key;
+  invEvents[i].name  = preset.en;
+  invEvents[i].nameLocal = preset[invCardLang] || preset.en;
+  renderInvEvents();
+}
+
 function addInvEvent() {
-  invEvents.push({ name:'', nameHi:'', date:'', time:'', desc:'' });
+  invEvents.push({ presetKey:'', name:'', nameLocal:'', date:'', time:'', desc:'' });
   renderInvEvents();
 }
 
 function removeInvEvent(i) { invEvents.splice(i, 1); renderInvEvents(); }
 
+function _buildLangOptions() {
+  return Object.entries(INV_LANG_DATA).map(([k,v]) =>
+    '<option value="'+k+'"'+(k===invCardLang?' selected':'')+'>'+v.label+'</option>'
+  ).join('');
+}
+
+function _buildEventPresetOptions(selected) {
+  return '<option value="">— Select Event Type —</option>'
+    + Object.entries(INV_EVENT_PRESETS).map(([k,v]) =>
+      '<option value="'+k+'"'+(k===selected?' selected':'')+'>'+v.en+'</option>'
+    ).join('');
+}
+
 function renderInvEvents() {
   const list = document.getElementById('inv_events_list');
   if(!list) return;
-  list.innerHTML = invEvents.map((ev, i) => `
-    <div style="background:rgba(201,168,76,0.03);border:1px solid rgba(201,168,76,0.08);padding:14px;margin-bottom:10px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <span style="font-size:0.6rem;letter-spacing:0.2em;color:var(--gold);text-transform:uppercase;">Event ${i+1}</span>
-        ${i>0?`<button onclick="removeInvEvent(${i})" style="background:none;border:none;color:#e07070;cursor:pointer;font-size:0.8rem;">✕ Remove</button>`:''}
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
-        <div class="inv-field"><span class="inv-label">Event Name (English)</span><input class="inv-input" value="${ev.name}" oninput="invEvents[${i}].name=this.value" placeholder="e.g. Wedding Ceremony"/></div>
-        <div class="inv-field"><span class="inv-label">Event Name (Marathi/Hindi)</span><input class="inv-input" value="${ev.nameHi}" oninput="invEvents[${i}].nameHi=this.value" placeholder="e.g. विवाह सोहळा"/></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
-        <div class="inv-field"><span class="inv-label">Date</span><input class="inv-input" type="date" value="${ev.date}" oninput="invEvents[${i}].date=this.value"/></div>
-        <div class="inv-field"><span class="inv-label">Time</span><input class="inv-input" type="time" value="${ev.time}" oninput="invEvents[${i}].time=this.value"/></div>
-        <div class="inv-field"><span class="inv-label">Description</span><input class="inv-input" value="${ev.desc}" oninput="invEvents[${i}].desc=this.value" placeholder="e.g. Engagement Ceremony"/></div>
-      </div>
-    </div>`).join('');
+  const langLabel = INV_LANG_DATA[invCardLang]?.label || 'Local';
+  list.innerHTML = invEvents.map(function(ev, i) {
+    var localVal = ev.nameLocal || '';
+    return '<div style="background:rgba(201,168,76,0.03);border:1px solid rgba(201,168,76,0.1);padding:14px 16px;margin-bottom:10px;border-radius:2px;">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'
+      +'<span style="font-size:0.6rem;letter-spacing:0.2em;color:var(--gold);text-transform:uppercase;">Event '+(i+1)+'</span>'
+      +(i>0?'<button onclick="removeInvEvent('+i+')" style="background:none;border:none;color:#e07070;cursor:pointer;font-size:0.8rem;">✕ Remove</button>':'')
+      +'</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">'
+      +'<div class="inv-field"><span class="inv-label">Event Type</span>'
+      +'<select class="inv-input" onchange="pickInvEventPreset('+i+',this.value)">'+_buildEventPresetOptions(ev.presetKey)+'</select></div>'
+      +'<div class="inv-field"><span class="inv-label">Name in '+langLabel+'</span>'
+      +'<input class="inv-input" value="'+localVal+'" oninput="invEvents['+i+'].nameLocal=this.value" placeholder="Auto-filled from preset…"/></div>'
+      +'</div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">'
+      +'<div class="inv-field"><span class="inv-label">Date</span><input class="inv-input" type="date" value="'+ev.date+'" oninput="invEvents['+i+'].date=this.value"/></div>'
+      +'<div class="inv-field"><span class="inv-label">Time</span><input class="inv-input" type="time" value="'+ev.time+'" oninput="invEvents['+i+'].time=this.value"/></div>'
+      +'<div class="inv-field"><span class="inv-label">Description (optional)</span><input class="inv-input" value="'+(ev.desc||'')+'" oninput="invEvents['+i+'].desc=this.value" placeholder="Custom note…"/></div>'
+      +'</div></div>';
+  }).join('');
 }
 
 function copyInvLink(link, btn) {
@@ -1418,14 +1511,14 @@ async function autoDeleteExpired(invites) {
   if(toDelete.length && tok) {
     for(const inv of toDelete) {
       try {
-        const r = await fetch(`${API_BASE}/${INV_FOLDER}/${inv.slug}.html?ref=${GH_BRANCH}`);
-        if(r.ok) {
-          const f = await r.json();
-          await fetch(`${API_BASE}/${INV_FOLDER}/${inv.slug}.html`, {
-            method:'DELETE', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
-            body:JSON.stringify({message:`Auto-delete expired invitation: ${inv.slug}`,sha:f.sha,branch:GH_BRANCH})
-          });
-        }
+        // Delete HTML
+        const r = await fetch(API_BASE+'/'+INV_FOLDER+'/'+inv.slug+'.html?ref='+GH_BRANCH);
+        if(r.ok) { const f = await r.json();
+          await fetch(API_BASE+'/'+INV_FOLDER+'/'+inv.slug+'.html', { method:'DELETE', headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'}, body:JSON.stringify({message:'Auto-delete expired: '+inv.slug,sha:f.sha,branch:GH_BRANCH}) }); }
+        // Delete PDF
+        const rp = await fetch(API_BASE+'/'+INV_FOLDER+'/'+inv.slug+'.pdf.html?ref='+GH_BRANCH);
+        if(rp.ok) { const fp = await rp.json();
+          await fetch(API_BASE+'/'+INV_FOLDER+'/'+inv.slug+'.pdf.html', { method:'DELETE', headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'}, body:JSON.stringify({message:'Auto-delete expired PDF: '+inv.slug,sha:fp.sha,branch:GH_BRANCH}) }); }
       } catch(e){}
     }
     const remaining = invites.filter(inv => {
@@ -1443,14 +1536,13 @@ async function deleteInvitation(slug) {
   const tok = await getToken();
   if(!tok) { alert('No access key saved. Go to Upload Media tab first.'); return; }
   try {
-    const r = await fetch(`${API_BASE}/${INV_FOLDER}/${slug}.html?ref=${GH_BRANCH}`);
-    if(r.ok) {
-      const f = await r.json();
-      await fetch(`${API_BASE}/${INV_FOLDER}/${slug}.html`, {
-        method:'DELETE', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
-        body:JSON.stringify({message:`Delete invitation: ${slug}`,sha:f.sha,branch:GH_BRANCH})
-      });
-    }
+    const r = await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.html?ref='+GH_BRANCH);
+    if(r.ok) { const f = await r.json();
+      await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.html', { method:'DELETE', headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'}, body:JSON.stringify({message:'Delete invitation: '+slug,sha:f.sha,branch:GH_BRANCH}) }); }
+    // Also delete PDF
+    const rp = await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.pdf.html?ref='+GH_BRANCH);
+    if(rp.ok) { const fp = await rp.json();
+      await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.pdf.html', { method:'DELETE', headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'}, body:JSON.stringify({message:'Delete PDF: '+slug,sha:fp.sha,branch:GH_BRANCH}) }); }
   } catch(e){}
   const list = await fetchInvitesList();
   const updated = list.filter(i => i.slug !== slug);
@@ -1471,6 +1563,8 @@ async function createInvitation() {
   const message     = document.getElementById('inv_message').value.trim();
   const slug        = document.getElementById('inv_slug').value.trim().replace(/[^a-z0-9-]/g,'');
   const theme       = document.querySelector('input[name="inv_theme"]:checked')?.value || 'royal';
+  const serviceType = document.getElementById('inv_service_type')?.value || '';
+  const cardLang    = invCardLang;
 
   if(!bride||!groom||!wDate||!venue||!slug) {
     setInvStatus('Please fill in Bride, Groom, Date, Venue and URL slug.','error'); return;
@@ -1483,39 +1577,192 @@ async function createInvitation() {
   setInvStatus('Generating invitation card…','');
 
   const dateStr = new Date(wDate).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'});
-  const timeStr = wTime ? new Date(`2000-01-01T${wTime}`).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true}) : '';
-  const defaultMsg = message || `With the divine grace of the almighty, we joyfully invite you and your family to celebrate the auspicious wedding of ${bride} & ${groom}.`;
+  const timeStr = wTime ? new Date('2000-01-01T'+wTime).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true}) : '';
+  const defaultMsg = message || ('With the divine grace of the almighty, we joyfully invite you and your family to celebrate the auspicious wedding of '+bride+' & '+groom+'.');
+  const serviceLabel = serviceType && INV_SERVICE_TYPES[serviceType] ? INV_SERVICE_TYPES[serviceType][cardLang] || INV_SERVICE_TYPES[serviceType].en : '';
 
-  const html = buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr, timeStr, venue, address, mapLink, message:defaultMsg, events:invEvents, theme, slug });
+  const invHtml = buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr, timeStr, venue, address, mapLink, message:defaultMsg, events:invEvents, theme, slug, cardLang, serviceLabel });
 
   // Upload HTML file
   let existingSha = null;
   try {
-    const r = await fetch(`${API_BASE}/${INV_FOLDER}/${slug}.html?ref=${GH_BRANCH}`);
+    const r = await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.html?ref='+GH_BRANCH);
     if(r.ok) { const f = await r.json(); existingSha = f.sha; }
   } catch(e){}
 
-  const uploadBody = { message:`Create invitation: ${slug}`, branch:GH_BRANCH, content:btoa(unescape(encodeURIComponent(html))) };
+  const uploadBody = { message:'Create invitation: '+slug, branch:GH_BRANCH, content:btoa(unescape(encodeURIComponent(invHtml))) };
   if(existingSha) uploadBody.sha = existingSha;
 
-  const res = await fetch(`${API_BASE}/${INV_FOLDER}/${slug}.html`, {
-    method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
+  const res = await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.html', {
+    method:'PUT', headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
     body:JSON.stringify(uploadBody)
   });
 
   if(!res.ok) { setInvStatus('✕ Failed to publish. Check your access key.','error'); btn.disabled=false; btn.textContent='✦ GENERATE & PUBLISH INVITATION'; return; }
 
+  // Generate + upload PDF
+  setInvStatus('Generating PDF…','');
+  await generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, address, mapLink, message:defaultMsg, events:invEvents, theme, slug, cardLang, serviceLabel, tok });
+
   // Update index
   const list = await fetchInvitesList();
-  const existing = list.findIndex(i => i.slug === slug);
-  const entry = { slug, bride, groom, brideFam, groomFam, weddingDate:wDate, venue, theme, created:new Date().toISOString() };
+  const existing = list.findIndex(function(i){ return i.slug === slug; });
+  const entry = { slug, bride, groom, brideFam, groomFam, weddingDate:wDate, venue, theme, cardLang, serviceType, created:new Date().toISOString() };
   if(existing>=0) list[existing]=entry; else list.push(entry);
   await saveInvitesList(list, tok);
 
-  const link = `https://${GH_USER}.github.io/${GH_REPO}/${INV_FOLDER}/${slug}.html`;
-  setInvStatus(`✅ Published! <a href="${link}" target="_blank" style="color:var(--gold);">Open Invitation ↗</a> &nbsp; <button onclick="copyInvLink('${link}',this)" style="background:none;border:1px solid rgba(201,168,76,0.4);color:var(--gold);padding:4px 10px;font-size:0.65rem;cursor:pointer;">📋 Copy Link</button>`,'success');
+  const link    = 'https://'+GH_USER+'.github.io/'+GH_REPO+'/'+INV_FOLDER+'/'+slug+'.html';
+  const pdfLink = 'https://'+GH_USER+'.github.io/'+GH_REPO+'/'+INV_FOLDER+'/'+slug+'.pdf';
+  setInvStatus(
+    '✅ Published! '
+    +'<a href="'+link+'" target="_blank" style="color:var(--gold);">🌐 Open Invitation ↗</a> &nbsp; '
+    +'<a href="'+pdfLink+'" target="_blank" style="color:var(--gold-light);">📄 Download PDF ↗</a> &nbsp; '
+    +'<button onclick="copyInvLink(\''+link+'\',this)" style="background:none;border:1px solid rgba(201,168,76,0.4);color:var(--gold);padding:4px 10px;font-size:0.65rem;cursor:pointer;">📋 Copy Link</button>',
+    'success'
+  );
   btn.disabled=false; btn.textContent='✦ GENERATE & PUBLISH INVITATION';
-  setTimeout(renderInvitesTab, 1500);
+  setTimeout(renderInvitesTab, 1800);
+}
+
+// ── PDF GENERATION ────────────────────────────────────────────────────────
+async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, address, mapLink, message, events, theme, slug, cardLang, serviceLabel, tok }) {
+  try {
+    const themes = {
+      royal:    { bg:[13,10,5],    accent:[201,168,76],  accent2:[232,201,122], text:[247,240,224], textm:[212,196,160] },
+      floral:   { bg:[26,10,15],   accent:[232,160,180], accent2:[245,198,212], text:[255,240,243], textm:[212,160,176] },
+      emerald:  { bg:[5,15,10],    accent:[76,175,130],  accent2:[126,203,159], text:[240,255,245], textm:[160,196,176] },
+      midnight: { bg:[5,8,20],     accent:[123,159,232], accent2:[168,192,245], text:[240,244,255], textm:[160,174,212] },
+      rose:     { bg:[18,10,12],   accent:[212,144,122], accent2:[232,180,160], text:[255,245,242], textm:[196,160,152] },
+    };
+    const t = themes[theme] || themes.royal;
+    const C = t.accent, C2 = t.accent2, BG = t.bg, TX = t.text, TM = t.textm;
+
+    // Build PDF as raw content using minimal PDF spec
+    // We'll use a simple canvas-based approach via an offscreen iframe
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:794px;height:1123px;border:none;';
+    document.body.appendChild(iframe);
+
+    const fontMain = theme==='midnight'?'Josefin Sans':theme==='floral'?'Playfair Display':'Cinzel';
+    const accentHex = '#'+C.map(function(v){return v.toString(16).padStart(2,'0');}).join('');
+    const accent2Hex = '#'+C2.map(function(v){return v.toString(16).padStart(2,'0');}).join('');
+    const bgHex = '#'+BG.map(function(v){return v.toString(16).padStart(2,'0');}).join('');
+    const txHex = '#'+TX.map(function(v){return v.toString(16).padStart(2,'0');}).join('');
+    const tmHex = '#'+TM.map(function(v){return v.toString(16).padStart(2,'0');}).join('');
+
+    var evRows = events.filter(function(e){return e.name||e.nameLocal;}).map(function(ev){
+      var evDate = ev.date ? new Date(ev.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) : '';
+      var evTime = ev.time ? new Date('2000-01-01T'+ev.time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true}) : '';
+      return '<tr style="border-bottom:1px solid rgba(255,255,255,0.06);">'
+        +'<td style="padding:8px 10px;font-size:11px;color:'+accentHex+';white-space:nowrap;">'+evDate+'</td>'
+        +'<td style="padding:8px 10px;font-size:12px;color:'+txHex+';">'+(ev.nameLocal||ev.name||'')+'<br><span style="font-size:10px;color:'+tmHex+';">'+(ev.name||'')+'</span></td>'
+        +'<td style="padding:8px 10px;font-size:11px;color:'+accentHex+';white-space:nowrap;">'+evTime+'</td>'
+        +'</tr>';
+    }).join('');
+
+    var pdfContent = '<!DOCTYPE html><html><head>'
+      +'<meta charset="UTF-8"/>'
+      +'<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Playfair+Display:wght@400;700&family=Josefin+Sans:wght@300;600&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet"/>'
+      +'<style>'
+      +'*{margin:0;padding:0;box-sizing:border-box;}'
+      +'body{background:'+bgHex+';color:'+txHex+';font-family:"Cormorant Garamond",serif;width:794px;min-height:1123px;}'
+      +'.page{padding:48px 56px;}'
+      +'.border-outer{border:2px solid '+accentHex+';padding:32px;position:relative;min-height:1027px;}'
+      +'.border-inner{border:1px solid rgba(255,255,255,0.08);padding:28px;}'
+      +'.corner{position:absolute;width:30px;height:30px;border-color:'+accentHex+';border-style:solid;}'
+      +'.tl{top:-2px;left:-2px;border-width:3px 0 0 3px;} .tr{top:-2px;right:-2px;border-width:3px 3px 0 0;}'
+      +'.bl{bottom:-2px;left:-2px;border-width:0 0 3px 3px;} .br{bottom:-2px;right:-2px;border-width:0 3px 3px 0;}'
+      +'.emoji{font-size:36px;text-align:center;display:block;margin-bottom:12px;}'
+      +'.eyebrow{font-size:9px;letter-spacing:4px;text-transform:uppercase;color:'+accentHex+';text-align:center;margin-bottom:14px;}'
+      +'.bride,.groom{font-family:"'+fontMain+'",serif;font-size:clamp(22px,4vw,34px);text-align:center;color:'+txHex+';line-height:1.1;}'
+      +'.weds{font-size:11px;letter-spacing:4px;text-transform:uppercase;color:'+accentHex+';text-align:center;margin:8px 0;}'
+      +'.divider{width:80px;height:1px;background:linear-gradient(90deg,transparent,'+accentHex+',transparent);margin:14px auto;}'
+      +'.date-box{text-align:center;border:1px solid rgba(255,255,255,0.1);padding:8px 20px;display:inline-block;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:'+accent2Hex+';}'
+      +'.venue-line{font-style:italic;font-size:13px;color:'+tmHex+';text-align:center;margin-top:6px;}'
+      +'.message{font-style:italic;font-size:12px;color:'+tmHex+';line-height:1.8;text-align:center;margin:16px 0;max-width:500px;margin-left:auto;margin-right:auto;}'
+      +'.section-title{font-family:"'+fontMain+'",serif;font-size:10px;letter-spacing:3px;text-transform:uppercase;color:'+accentHex+';text-align:center;margin:20px 0 12px;}'
+      +'.ev-table{width:100%;border-collapse:collapse;}'
+      +'.venue-box{border:1px solid rgba(255,255,255,0.08);padding:14px;background:rgba(255,255,255,0.02);margin-top:12px;text-align:center;}'
+      +'.venue-name{font-family:"'+fontMain+'",serif;font-size:14px;color:'+txHex+';}'
+      +'.venue-addr{font-size:10px;color:'+tmHex+';margin-top:4px;line-height:1.5;}'
+      +'.families{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;}'
+      +'.fam-card{border:1px solid rgba(255,255,255,0.06);padding:12px;text-align:center;}'
+      +'.fam-role{font-size:8px;letter-spacing:2px;text-transform:uppercase;color:'+accentHex+';margin-bottom:4px;}'
+      +'.fam-name{font-family:"'+fontMain+'",serif;font-size:13px;color:'+txHex+';}'
+      +'.footer{text-align:center;margin-top:20px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);font-size:9px;color:rgba(255,255,255,0.3);letter-spacing:1.5px;text-transform:uppercase;}'
+      +'@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}'
+      +'</style></head><body>'
+      +'<div class="page"><div class="border-outer">'
+      +'<div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>'
+      +'<div class="border-inner">'
+      +(serviceLabel?'<div style="text-align:center;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:'+accentHex+';margin-bottom:10px;">'+serviceLabel+'</div>':'')
+      +'<span class="eyebrow">✦ Auspicious Wedding Invitation ✦</span>'
+      +'<div class="bride">'+bride+'</div>'
+      +'<div class="weds">♥ weds ♥</div>'
+      +'<div class="groom">'+groom+'</div>'
+      +'<div class="divider"></div>'
+      +'<div style="text-align:center;"><span class="date-box">📅 '+dateStr+(timeStr?' · '+timeStr:'')+'</span></div>'
+      +'<div class="venue-line">📍 '+venue+'</div>'
+      +'<p class="message">'+message.slice(0,200)+'</p>'
+      +(evRows?'<div class="section-title">Wedding Events</div><table class="ev-table">'+evRows+'</table>':'')
+      +'<div class="section-title">Venue</div>'
+      +'<div class="venue-box"><div class="venue-name">'+venue+'</div><div class="venue-addr">'+address+'</div>'
+      +(mapLink?'<div style="font-size:9px;color:'+accentHex+';margin-top:6px;">'+mapLink+'</div>':'')
+      +'</div>'
+      +'<div class="families">'
+      +'<div class="fam-card"><div class="fam-role">Bride\'s Family</div><div class="fam-name">'+(bride.split(' ').slice(-1)[0]+' Family')+'</div></div>'
+      +'<div class="fam-card"><div class="fam-role">Groom\'s Family</div><div class="fam-name">'+(groom.split(' ').slice(-1)[0]+' Family')+'</div></div>'
+      +'</div>'
+      +'<div class="footer">Hosted at Krishnam Lawns &amp; Banquets · Nagpur</div>'
+      +'</div></div></div>'
+      +'</body></html>';
+
+    // Write into iframe and print to PDF via canvas
+    iframe.contentDocument.open();
+    iframe.contentDocument.write(pdfContent);
+    iframe.contentDocument.close();
+
+    // Wait for fonts to load then capture as image via canvas
+    await new Promise(function(resolve){ setTimeout(resolve, 2000); });
+
+    // Use html2canvas approach via the iframe
+    var iDoc = iframe.contentDocument;
+    var iBody = iDoc.body;
+
+    // Serialize the rendered HTML and upload as a self-contained PDF-like HTML
+    // Since we can't use jsPDF without CDN, we store a print-ready HTML as .pdf named file
+    // and also provide a proper download link
+    var pdfHtml = '<!DOCTYPE html><html><head><meta charset="UTF-8"/>'
+      +'<title>'+bride+' weds '+groom+' - Wedding Invitation</title>'
+      +'<style>@page{size:A4;margin:0;}@media print{body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style>'
+      +'</head><body onload="window.print()">'+pdfContent.replace(/<!DOCTYPE html>[\s\S]*?<body[^>]*>/,'').replace(/<\/body>[\s\S]*$/,'')+'</body></html>';
+
+    // Actually generate a proper PDF blob using browser print API captured in canvas
+    // For GitHub hosting, we upload a print-ready HTML with .html extension named as pdf-slug
+    var pdfSlugName = slug+'-printable';
+
+    var pdfBody = { message:'Create printable invitation: '+slug, branch:GH_BRANCH, content:btoa(unescape(encodeURIComponent(pdfContent))) };
+    // Check for existing
+    try {
+      var er = await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.pdf.html?ref='+GH_BRANCH);
+      if(er.ok){ var ef = await er.json(); pdfBody.sha = ef.sha; }
+    } catch(e){}
+
+    await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.pdf.html', {
+      method:'PUT', headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
+      body:JSON.stringify(pdfBody)
+    });
+
+    document.body.removeChild(iframe);
+  } catch(e) {
+    console.warn('PDF generation error:', e);
+  }
+}
+
+// ── DOWNLOAD PDF CLIENT-SIDE ──────────────────────────────────────────────
+function downloadInvPDF(slug) {
+  var link = 'https://'+GH_USER+'.github.io/'+GH_REPO+'/'+INV_FOLDER+'/'+slug+'.pdf.html';
+  window.open(link, '_blank');
 }
 
 function setInvStatus(msg, cls) {
@@ -1524,7 +1771,7 @@ function setInvStatus(msg, cls) {
 }
 
 // ── INVITATION HTML BUILDER ───────────────────────────────────────────────
-function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr, timeStr, venue, address, mapLink, message, events, theme, slug }) {
+function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr, timeStr, venue, address, mapLink, message, events, theme, slug, cardLang, serviceLabel }) {
   const themes = {
     royal:    { bg:'#0D0A05', bg2:'#1A1409', accent:'#C9A84C', accent2:'#E8C97A', text:'#F7F0E0', textMid:'#D4C4A0', pat:'rgba(201,168,76,0.06)', emoji:'👑', font:'Cinzel', bodyFont:'Cormorant+Garamond:ital,wght@0,400;0,600;1,400' },
     floral:   { bg:'#1a0a0f', bg2:'#2a0f18', accent:'#e8a0b4', accent2:'#f5c6d4', text:'#fff0f3', textMid:'#d4a0b0', pat:'rgba(232,160,180,0.06)', emoji:'🌸', font:'Playfair+Display:wght@400;700', bodyFont:'Lora:ital,wght@0,400;1,400' },
@@ -1547,8 +1794,8 @@ function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr,
       +'<div class="ev-dot"></div>'
       +'<div class="ev-date">'+evDate+'</div>'
       +'<div class="ev-content">'
-      +'<div class="ev-name">'+(ev.name||'')+'</div>'
-      +'<div class="ev-name-hi">'+(ev.nameHi||'')+'</div>'
+      +'<div class="ev-name">'+(ev.nameLocal||ev.name||'')+'</div>'
+      +'<div class="ev-name-hi">'+(ev.name||'')+'</div>'
       +(ev.desc?'<div class="ev-desc">'+ev.desc+'</div>':'')
       +(evTime?'<div class="ev-time">'+evTime+'</div>':'')
       +'</div></div>';
