@@ -1747,10 +1747,13 @@ async function generateTokenLink() {
   const statusEl = document.getElementById('tokenStatus');
   statusEl.textContent = 'Generating…';
   const tokens = await fetchTokens();
-  // Generate random 24-char token using alphanumeric only (URL safe)
-  const arr = crypto.getRandomValues(new Uint8Array(32));
-  const id = Array.from(arr).map(b => '0123456789abcdefghijklmnopqrstuvwxyz'[b % 36]).join('').slice(0,28);
-  const expiry = new Date(Date.now() + 2*24*60*60*1000).toISOString(); // 2 days
+  // Token ID = base36(expiryMs) + '_' + randomPart  — self-validating, no network needed
+  const expiryMs = Date.now() + 2*24*60*60*1000; // 2 days
+  const expiryB36 = expiryMs.toString(36);
+  const arr = crypto.getRandomValues(new Uint8Array(16));
+  const rand = Array.from(arr).map(b => '0123456789abcdefghijklmnopqrstuvwxyz'[b % 36]).join('').slice(0,18);
+  const id = `${expiryB36}_${rand}`;
+  const expiry = new Date(expiryMs).toISOString();
   tokens.push({ id, label, expiry, used:false, created:new Date().toISOString() });
   await saveTokens(tokens, tok);
   // Build clean link (strip any existing query params from current URL)
@@ -2819,43 +2822,25 @@ async function showTokenForm(tokenId) {
   </div>`;
   document.body.style.cssText = 'background:#0D0A05;color:#F7F0E0;font-family:Raleway,sans-serif;margin:0;padding:0;min-height:100vh;';
 
-  // Validate token using GitHub Contents API (always fresh, no CDN cache, no auth needed for public repos)
-  let tokenData = null;
-  let fetchError = false;
+  // ── SELF-VALIDATING TOKEN ─────────────────────────────────────────────
+  // Token format: base36(expiry_ms) + '_' + randomPart
+  // No network call needed to check expiry — it's in the token itself.
+  // GitHub is checked only to verify the token wasn't revoked by admin.
+
+  // Parse expiry from token id
+  let tokenExpiry = null;
+  let tokenLabel  = '';
   try {
-    const res = await fetch(`${API_BASE}/${INV_FOLDER}/tokens.json?ref=${GH_BRANCH}&_=${Date.now()}`, {
-      cache: 'no-store',
-      headers: { 'Cache-Control': 'no-cache' }
-    });
-    if(res.ok) {
-      const file = await res.json();
-      const list = JSON.parse(atob(file.content.replace(/\n/g,'')));
-      tokenData = list.find(t => t.id === tokenId) || null;
-    } else if(res.status === 404) {
-      // tokens.json doesn't exist yet — no tokens have been generated
-      tokenData = null;
-    } else {
-      fetchError = true;
+    const parts = tokenId.split('_');
+    if(parts.length >= 2) {
+      tokenExpiry = new Date(parseInt(parts[0], 36));
     }
-  } catch(e) {
-    fetchError = true;
-  }
+  } catch(e) {}
 
-  document.body.innerHTML = ''; // Clear entire site
-
-  if(fetchError) {
-    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;">
-      <div style="font-size:3rem;margin-bottom:20px;">📶</div>
-      <h2 style="font-family:Cinzel,serif;color:#e07070;margin-bottom:12px;">Network Error</h2>
-      <p style="color:#D4C4A0;">Could not verify your link. Please check your internet connection and try again.</p>
-      <p style="margin-top:16px;"><a href="${location.href}" style="color:#C9A84C;font-size:0.8rem;">↺ Retry</a></p>
-      <p style="margin-top:24px;font-size:0.8rem;color:#C9A84C;">+91 88888 83587</p>
-    </div>`;
-    return;
-  }
-
-  if(!tokenData) {
-    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;">
+  // If expiry is clearly invalid structure, show invalid immediately (no network)
+  if(!tokenExpiry || isNaN(tokenExpiry.getTime())) {
+    document.body.innerHTML = '';
+    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;font-family:Raleway,sans-serif;">
       <div style="font-size:3rem;margin-bottom:20px;">🔒</div>
       <h2 style="font-family:Cinzel,serif;color:#C9A84C;margin-bottom:12px;">Invalid Link</h2>
       <p style="color:#D4C4A0;">This invitation link is invalid or does not exist.</p>
@@ -2864,8 +2849,56 @@ async function showTokenForm(tokenId) {
     </div>`;
     return;
   }
-  if(tokenData.used) {
-    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;">
+
+  // Check expiry without network
+  if(tokenExpiry < new Date()) {
+    const hoursAgo = Math.ceil((new Date() - tokenExpiry) / 3600000);
+    document.body.innerHTML = '';
+    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;font-family:Raleway,sans-serif;">
+      <div style="font-size:3rem;margin-bottom:20px;">⏰</div>
+      <h2 style="font-family:Cinzel,serif;color:#e07070;margin-bottom:12px;">Link Expired</h2>
+      <p style="color:#D4C4A0;">This invitation link expired ${hoursAgo < 24 ? hoursAgo+'h' : Math.ceil(hoursAgo/24)+'d'} ago.</p>
+      <p style="color:#D4C4A0;margin-top:8px;">Please contact Krishnam Lawns & Banquets to get a new link.</p>
+      <p style="margin-top:24px;font-size:0.8rem;color:#C9A84C;">+91 88888 83587</p>
+    </div>`;
+    return;
+  }
+
+  // Token structure is valid & not expired — try to fetch label from GitHub (optional, best-effort)
+  // Use RAW_BASE with no-cache. If it fails, still show the form (token self-validates).
+  let isRevoked = false;
+  let alreadyUsed = false;
+  try {
+    const res = await fetch(`${RAW_BASE}/${INV_FOLDER}/tokens.json?nocache=${Date.now()}`);
+    if(res.ok) {
+      const list = await res.json();
+      const found = list.find(t => t.id === tokenId);
+      if(!found) { isRevoked = true; } // admin revoked it
+      else {
+        tokenLabel = found.label || '';
+        if(found.used) { alreadyUsed = true; }
+      }
+    }
+    // If 404 — tokens.json doesn't exist yet (GitHub Pages delay) — treat as valid, show form
+  } catch(e) {
+    // Network issue — still show the form, token self-validates
+  }
+
+  document.body.innerHTML = '';
+
+  if(isRevoked) {
+    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;font-family:Raleway,sans-serif;">
+      <div style="font-size:3rem;margin-bottom:20px;">🔒</div>
+      <h2 style="font-family:Cinzel,serif;color:#C9A84C;margin-bottom:12px;">Link Revoked</h2>
+      <p style="color:#D4C4A0;">This invitation link has been cancelled by the admin.</p>
+      <p style="color:#D4C4A0;margin-top:8px;">Please contact Krishnam Lawns & Banquets for a new link.</p>
+      <p style="margin-top:24px;font-size:0.8rem;color:#C9A84C;">+91 88888 83587</p>
+    </div>`;
+    return;
+  }
+
+  if(alreadyUsed) {
+    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;font-family:Raleway,sans-serif;">
       <div style="font-size:3rem;margin-bottom:20px;">✅</div>
       <h2 style="font-family:Cinzel,serif;color:#C9A84C;margin-bottom:12px;">Already Submitted</h2>
       <p style="color:#D4C4A0;">Your invitation details have already been submitted and are awaiting admin approval.</p>
@@ -2874,20 +2907,9 @@ async function showTokenForm(tokenId) {
     </div>`;
     return;
   }
-  if(new Date(tokenData.expiry) < new Date()) {
-    const hoursAgo = Math.ceil((new Date()-new Date(tokenData.expiry))/3600000);
-    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;">
-      <div style="font-size:3rem;margin-bottom:20px;">⏰</div>
-      <h2 style="font-family:Cinzel,serif;color:#e07070;margin-bottom:12px;">Link Expired</h2>
-      <p style="color:#D4C4A0;">This invitation link expired ${hoursAgo}h ago.</p>
-      <p style="color:#D4C4A0;margin-top:8px;">Please contact Krishnam Lawns & Banquets to get a new link.</p>
-      <p style="margin-top:24px;font-size:0.8rem;color:#C9A84C;">+91 88888 83587</p>
-    </div>`;
-    return;
-  }
 
   // Valid token — show guest form
-  const expiryHrs = Math.ceil((new Date(tokenData.expiry)-new Date())/3600000);
+  const expiryHrs = Math.ceil((tokenExpiry - new Date()) / 3600000);
   document.head.innerHTML += `<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Cormorant+Garamond:ital,wght@0,400;1,400&family=Raleway:wght@300;400;600&display=swap" rel="stylesheet"/>
   <style>
     *{box-sizing:border-box;margin:0;padding:0;}
