@@ -108,6 +108,9 @@
     .video-badge { position:absolute; top:10px; right:10px; background:rgba(201,168,76,0.9); color:var(--dark); font-size:0.6rem; font-weight:700; letter-spacing:0.15em; padding:3px 8px; z-index:3; }
     .gallery-empty { max-width:1100px; margin:0 auto; text-align:center; padding:80px 20px; border:1px dashed rgba(201,168,76,0.15); display:none; }
     .gallery-empty p { font-family:'Cormorant Garamond',serif; font-size:1.15rem; font-style:italic; color:var(--text-light); margin-top:16px; }
+    .gallery-tab { background:rgba(201,168,76,0.03); border:1px solid rgba(201,168,76,0.18); color:var(--text-light); padding:7px 18px; cursor:pointer; font-family:'Raleway',sans-serif; font-size:0.62rem; letter-spacing:0.18em; text-transform:uppercase; transition:all 0.2s; }
+    .gallery-tab:hover { background:rgba(201,168,76,0.08); border-color:rgba(201,168,76,0.4); color:var(--cream); }
+    .gallery-tab.active { background:rgba(201,168,76,0.14); border-color:var(--gold); color:var(--gold); }
 
     /* GUEST UPLOAD */
     #guest-upload { padding:100px 60px; background:var(--dark2); }
@@ -368,6 +371,7 @@
 <!-- GALLERY -->
 <section id="gallery">
   <div class="section-header reveal"><p class="section-eyebrow">Our Portfolio</p><h2 class="section-title">Moments We've Created</h2><p class="section-desc">A glimpse into the world of celebrations we've had the privilege of bringing to life.</p></div>
+  <div id="galleryTabs" style="display:none;max-width:1100px;margin:0 auto 32px;display:flex;flex-wrap:wrap;gap:8px;justify-content:center;"></div>
   <div class="gallery-grid reveal" id="galleryGrid"></div>
   <div class="gallery-empty" id="galleryEmpty"><div style="font-size:3rem;">🖼️</div><p>Our gallery is being curated.<br>Check back soon for beautiful moments.</p></div>
 </section>
@@ -508,6 +512,7 @@ const API_BASE   = `https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents`
 let mediaItems    = [];
 let lightboxIndex = 0;
 let adminQueue    = [];
+let uploadCat     = 'wedding'; // default upload category
 let currentTab    = 'upload';
 let configSha     = null;   // sha of config.json for updates
 let globalConfig  = null;   // cached config loaded from GitHub
@@ -670,10 +675,32 @@ function submitForm() {
 }
 
 // ── GALLERY LOADER ────────────────────────────────────────────────────────
+// Category config for gallery
+const GALLERY_CATS = {
+  wedding:   { label:'💍 Weddings',    emoji:'💍' },
+  reception: { label:'🎊 Receptions',  emoji:'🎊' },
+  birthday:  { label:'🎂 Birthdays',   emoji:'🎂' },
+  corporate: { label:'🏢 Corporate',   emoji:'🏢' },
+  other:     { label:'✨ Other',       emoji:'✨' },
+};
+
+// Extract category from filename prefix: wedding_xxx.jpg → 'wedding'
+function catFromFilename(name) {
+  const lower = name.toLowerCase();
+  for (const key of Object.keys(GALLERY_CATS)) {
+    if (key !== 'other' && lower.startsWith(key + '_')) return key;
+  }
+  return 'other';
+}
+
+let activeGalleryTab = 'all';
+let allMediaItems = []; // full unfiltered list
+
 async function loadGallery() {
   const url   = `https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents/${GH_FOLDER}?ref=${GH_BRANCH}`;
   const grid  = document.getElementById('galleryGrid');
   const empty = document.getElementById('galleryEmpty');
+  const tabsEl = document.getElementById('galleryTabs');
   try {
     const res   = await fetch(url);
     if (!res.ok) throw 0;
@@ -682,24 +709,64 @@ async function loadGallery() {
       const e = f.name.split('.').pop().toLowerCase();
       return IMG_EXTS.includes(e) || VID_EXTS.includes(e);
     });
-    if (!media.length) { grid.style.display='none'; empty.style.display='block'; return; }
-    mediaItems = media.map(f => {
+    if (!media.length) { grid.style.display='none'; empty.style.display='block'; tabsEl.style.display='none'; return; }
+
+    allMediaItems = media.map(f => {
       const ext  = f.name.split('.').pop().toLowerCase();
       const type = VID_EXTS.includes(ext) ? 'video' : 'image';
-      return { type, src: `https://raw.githubusercontent.com/${GH_USER}/${GH_REPO}/${GH_BRANCH}/${GH_FOLDER}/${f.name}`, name: f.name, sha: f.sha };
+      const cat  = catFromFilename(f.name);
+      return { type, src: `https://raw.githubusercontent.com/${GH_USER}/${GH_REPO}/${GH_BRANCH}/${GH_FOLDER}/${f.name}`, name: f.name, sha: f.sha, cat };
     });
-    grid.innerHTML = '';
-    mediaItems.forEach((item, idx) => {
-      const d = document.createElement('div');
-      d.className = 'gallery-item';
-      d.onclick = () => openLightbox(idx);
-      d.innerHTML = item.type === 'image'
-        ? `<img src="${item.src}" alt="${item.name}" loading="lazy"/><div class="g-overlay"><span class="overlay-icon">🔍</span></div>`
-        : `<video src="${item.src}" muted loop preload="metadata"></video><div class="video-badge">VIDEO</div><div class="g-overlay"><span class="overlay-icon">▶</span></div>`;
-      grid.appendChild(d);
-    });
-    empty.style.display = 'none'; grid.style.display = '';
-  } catch(e) { grid.style.display='none'; empty.style.display='block'; }
+
+    // Build tabs — only show categories that actually have photos
+    const usedCats = [...new Set(allMediaItems.map(i => i.cat))];
+    if (usedCats.length > 1) {
+      tabsEl.style.display = 'flex';
+      const allActive = activeGalleryTab === 'all';
+      tabsEl.innerHTML = `<button class="gallery-tab${allActive?' active':''}" onclick="filterGallery('all')">✦ All</button>`
+        + usedCats.map(c => {
+            const cfg = GALLERY_CATS[c] || GALLERY_CATS.other;
+            const isActive = activeGalleryTab === c;
+            return `<button class="gallery-tab${isActive?' active':''}" onclick="filterGallery('${c}')">${cfg.label}</button>`;
+          }).join('');
+    } else {
+      tabsEl.style.display = 'none';
+    }
+
+    renderGalleryGrid();
+    empty.style.display = 'none';
+  } catch(e) { grid.style.display='none'; empty.style.display='block'; tabsEl.style.display='none'; }
+}
+
+function filterGallery(cat) {
+  activeGalleryTab = cat;
+  // Update tab active state
+  document.querySelectorAll('.gallery-tab').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.includes('All') ? cat==='all' : btn.getAttribute('onclick').includes("'"+cat+"'"));
+  });
+  renderGalleryGrid();
+}
+
+function renderGalleryGrid() {
+  const grid = document.getElementById('galleryGrid');
+  const empty = document.getElementById('galleryEmpty');
+  const filtered = activeGalleryTab === 'all' ? allMediaItems : allMediaItems.filter(i => i.cat === activeGalleryTab);
+  mediaItems = filtered; // update global for lightbox
+  if (!filtered.length) { grid.style.display='none'; empty.style.display='block'; return; }
+  grid.innerHTML = '';
+  filtered.forEach((item, idx) => {
+    const d = document.createElement('div');
+    d.className = 'gallery-item';
+    d.onclick = () => openLightbox(idx);
+    const catCfg = GALLERY_CATS[item.cat] || GALLERY_CATS.other;
+    const catBadge = `<span style="position:absolute;top:8px;right:8px;background:rgba(13,10,5,0.75);border:1px solid rgba(201,168,76,0.3);color:var(--gold);font-size:0.5rem;letter-spacing:0.15em;text-transform:uppercase;padding:3px 8px;pointer-events:none;">${catCfg.emoji} ${item.cat === 'other' ? '' : item.cat}</span>`;
+    d.innerHTML = item.type === 'image'
+      ? `<img src="${item.src}" alt="${item.name}" loading="lazy"/><div class="g-overlay"><span class="overlay-icon">🔍</span></div>${catBadge}`
+      : `<video src="${item.src}" muted loop preload="metadata"></video><div class="video-badge">VIDEO</div><div class="g-overlay"><span class="overlay-icon">▶</span></div>${catBadge}`;
+    grid.appendChild(d);
+  });
+  grid.style.display = '';
+  empty.style.display = 'none';
 }
 
 // ── LIGHTBOX ──────────────────────────────────────────────────────────────
@@ -854,6 +921,16 @@ async function renderUploadTab() {
 
   c.innerHTML = `
   ${tokenSection}
+  <div style="margin-bottom:14px;">
+    <label style="font-size:0.6rem;letter-spacing:0.2em;text-transform:uppercase;color:var(--gold);display:block;margin-bottom:8px;">Photo Category</label>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;" id="catBtnGroup">
+      <button type="button" class="gallery-tab active" onclick="selectUploadCat('wedding',this)">💍 Wedding</button>
+      <button type="button" class="gallery-tab" onclick="selectUploadCat('reception',this)">🎊 Reception</button>
+      <button type="button" class="gallery-tab" onclick="selectUploadCat('birthday',this)">🎂 Birthday</button>
+      <button type="button" class="gallery-tab" onclick="selectUploadCat('corporate',this)">🏢 Corporate</button>
+      <button type="button" class="gallery-tab" onclick="selectUploadCat('other',this)">✨ Other</button>
+    </div>
+  </div>
   <div class="admin-upload-area" id="adminDropArea">
     <input type="file" id="adminFileInput" accept="image/*,video/mp4,video/webm" multiple onchange="handleAdminFiles(this.files)"/>
     <div style="font-size:2rem;margin-bottom:8px;">📂</div>
@@ -891,6 +968,12 @@ function renderAdminFileList() {
 }
 function removeAdminFile(i) { adminQueue.splice(i,1); renderAdminFileList(); }
 
+function selectUploadCat(cat, btn) {
+  uploadCat = cat;
+  document.querySelectorAll('#catBtnGroup .gallery-tab').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+}
+
 async function doAdminUpload() {
   const tok = getToken();
   if(!tok)               { setAdminSt('Please save your access token first (see above).','error'); return; }
@@ -900,7 +983,7 @@ async function doAdminUpload() {
   for(const file of adminQueue){
     setAdminSt(`Uploading ${file.name}…`,'');
     const b64 = await fileToBase64(file);
-    const path= `${GH_FOLDER}/${Date.now()}_${file.name.replace(/\s+/g,'_')}`;
+    const path= `${GH_FOLDER}/${uploadCat}_${Date.now()}_${file.name.replace(/\s+/g,'_')}`;
     const res = await fetch(`https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents/${path}`,{
       method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
       body:JSON.stringify({message:`Upload ${file.name}`,content:b64,branch:GH_BRANCH})
@@ -942,7 +1025,7 @@ function bindPendingBtns() {
       const item=getPending()[idx];
       btn.textContent='Publishing…'; btn.disabled=true;
       const b64 = item.dataUrl.includes(',') ? item.dataUrl.split(',')[1] : item.dataUrl;
-      const path=`${GH_FOLDER}/${Date.now()}_${item.fileName.replace(/\s+/g,'_')}`;
+      const path=`${GH_FOLDER}/other_${Date.now()}_${item.fileName.replace(/\s+/g,'_')}`;
       const res=await fetch(`https://api.github.com/repos/${GH_USER}/${GH_REPO}/contents/${path}`,{
         method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
         body:JSON.stringify({message:`Approved: ${item.fileName}`,content:b64,branch:GH_BRANCH})
@@ -962,9 +1045,10 @@ function removePending(idx){ const p=getPending(); p.splice(idx,1); savePending(
 
 // MANAGE TAB
 function manageTabHTML() {
-  if(!mediaItems.length) return `<div class="pending-empty">Gallery is empty. Upload photos & videos first.</div>`;
+  const items = allMediaItems.length ? allMediaItems : mediaItems;
+  if(!items.length) return `<div class="pending-empty">Gallery is empty. Upload photos & videos first.</div>`;
   return `<p style="font-size:0.7rem;letter-spacing:0.12em;color:var(--text-light);margin-bottom:18px;text-transform:uppercase;">Hover over any photo/video to delete it from the gallery.</p>
-  <div class="manage-grid">${mediaItems.map((item,idx)=>`
+  <div class="manage-grid">${items.map((item,idx)=>`
   <div class="manage-item">
     ${item.type==='image'?`<img src="${item.src}" alt="${item.name}" loading="lazy"/>`:
     `<video src="${item.src}" muted preload="metadata"></video>`}
@@ -1270,10 +1354,8 @@ async function renderInvitesTab() {
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:22px;" id="invTypeGrid">
     <button type="button" id="invtype_wedding"   onclick="selectInvType('wedding')"   class="inv-type-btn inv-type-active"><div class="inv-type-icon">💍</div>Wedding Ceremony</button>
     <button type="button" id="invtype_reception" onclick="selectInvType('reception')" class="inv-type-btn"><div class="inv-type-icon">🎊</div>Reception &amp; Party</button>
-    <button type="button" id="invtype_catering"  onclick="selectInvType('catering')"  class="inv-type-btn"><div class="inv-type-icon">🍽️</div>Catering &amp; Cuisine</button>
+    <button type="button" id="invtype_birthday"  onclick="selectInvType('birthday')"  class="inv-type-btn"><div class="inv-type-icon">🎂</div>Birthday Party</button>
     <button type="button" id="invtype_corporate" onclick="selectInvType('corporate')" class="inv-type-btn"><div class="inv-type-icon">🏢</div>Corporate Event</button>
-    <button type="button" id="invtype_social"    onclick="selectInvType('social')"    class="inv-type-btn"><div class="inv-type-icon">🎉</div>Social Celebration</button>
-    <button type="button" id="invtype_lawn"      onclick="selectInvType('lawn')"      class="inv-type-btn"><div class="inv-type-icon">🌿</div>Open Lawn Event</button>
   </div>
 
   <!-- ══ STEP 2: DETAILS ══════════════════════════════════════════════════ -->
@@ -1403,28 +1485,29 @@ const INV_EVENT_PRESETS = {
   'lunch':         { en:'Wedding Lunch',          hi:'विवाह भोज',        mr:'विवाह भोजन',         te:'వివాహ భోజనం',        ta:'திருமண விருந்து',    gu:'લગ્ન ભોજન',      bn:'বিবাহের ভোজ',       pa:'ਵਿਆਹ ਦਾ ਭੋਜ',       ur:'شادی کا کھانا',    desc:'Culinary Celebration' },
   'vidaai':        { en:'Vidaai — Bride\'s Farewell', hi:'विदाई',        mr:'निरोप',              te:'వీడ్కోలు',           ta:'வீடு வழியனுப்பு',   gu:'વિદાઈ',          bn:'বিদায়',             pa:'ਵਿਦਾਈ',             ur:'رخصتی',             desc:'Farewell Blessing' },
   'custom':        { en:'Custom Event',           hi:'अन्य कार्यक्रम',   mr:'इतर कार्यक्रम',      te:'ఇతర కార్యక్రమం',     ta:'பிற நிகழ்ச்சி',     gu:'અન્ય કાર્યક્રમ', bn:'অন্যান্য অনুষ্ঠান', pa:'ਹੋਰ ਸਮਾਗਮ',         ur:'دیگر تقریب',        desc:'' },
+  'bday_main':     { en:'Birthday Celebration',    hi:'जन्मदिन उत्सव',    mr:'वाढदिवस सोहळा',      te:'పుట్టినరోజు వేడుక',   ta:'பிறந்தநாள் விழா',    gu:'જન્મદિવસ ઉત્સવ', bn:'জন্মদিন উৎসব',       pa:'ਜਨਮਦਿਨ ਸਮਾਰੋਹ',     ur:'سالگرہ کی تقریب',  desc:'The Big Day!' },
+  'bday_cake':     { en:'Cake Cutting Ceremony',   hi:'केक काटने की रस्म', mr:'केक कापण्याचा सोहळा', te:'కేక్ కటింగ్ సెరెమనీ', ta:'கேக் வெட்டும் விழா',  gu:'કેક કટિંગ',       bn:'কেক কাটা অনুষ্ঠান',  pa:'ਕੇਕ ਕੱਟਣ ਦੀ ਰਸਮ',  ur:'کیک کاٹنے کی رسم',  desc:'Sweet Moments' },
+  'bday_lunch':    { en:'Birthday Lunch / Dinner',  hi:'जन्मदिन भोज',      mr:'वाढदिवसाचे जेवण',    te:'పుట్టినరోజు విందు',   ta:'பிறந்தநாள் விருந்து', gu:'જન્મદિવસ ભોજન',   bn:'জন্মদিনের ভোজ',      pa:'ਜਨਮਦਿਨ ਦਾ ਖਾਣਾ',   ur:'سالگرہ کا کھانا',   desc:'Culinary Delight' },
+  'bday_games':    { en:'Games & Activities',       hi:'खेल और गतिविधियाँ', mr:'खेळ आणि उपक्रम',     te:'ఆటలు & కార్యకలాపాలు', ta:'விளையாட்டு நிகழ்ச்சி',gu:'રમત-ગમત',          bn:'খেলাধুলা ও কার্যক্রম',pa:'ਖੇਡਾਂ ਅਤੇ ਗਤੀਵਿਧੀਆਂ',ur:'کھیل اور سرگرمیاں',  desc:'Fun Time!' },
+  'bday_dance':    { en:'Dance & Entertainment',    hi:'नृत्य और मनोरंजन',  mr:'नृत्य आणि मनोरंजन',   te:'నృత్యం & వినోదం',     ta:'நடனம் & பொழுதுபோக்கு',gu:'નૃત્ય & મનોરંજન',  bn:'নাচ ও বিনোদন',        pa:'ਨਾਚ ਅਤੇ ਮਨੋਰੰਜਨ',  ur:'رقص اور تفریح',      desc:'Dance Floor Open!' },
 };
 
 // Service type translations for cards
 const INV_SERVICE_TYPES = {
   'wedding':    { en:'Wedding Ceremonies',      hi:'विवाह समारोह',        mr:'लग्न सोहळा' },
   'reception':  { en:'Receptions & Parties',    hi:'स्वागत समारोह',       mr:'स्वागत सोहळा' },
-  'catering':   { en:'Catering & Cuisine',      hi:'कैटरिंग एवं व्यंजन',  mr:'केटरिंग व पदार्थ' },
+  'birthday':   { en:'Birthday Celebrations',   hi:'जन्मदिन उत्सव',       mr:'वाढदिवस सोहळा' },
   'corporate':  { en:'Corporate Events',        hi:'कॉर्पोरेट कार्यक्रम', mr:'कॉर्पोरेट कार्यक्रम' },
-  'social':     { en:'Social Celebrations',     hi:'सामाजिक समारोह',      mr:'सामाजिक समारंभ' },
-  'lawn':       { en:'Open Lawn Events',        hi:'ओपन लॉन कार्यक्रम',   mr:'उघडे लॉन कार्यक्रम' },
 };
 
 let invCardLang = 'mr'; // default card language
 
 // ── INVITATION TYPE SELECTOR ──────────────────────────────────────────────
 const INV_TYPE_META = {
-  wedding:   { title:'✦ Step 2 — Wedding Invitation Details',    evTitle:'✦ Step 3 — Wedding Events',      l1:"Bride's Full Name",   l2:"Groom's Full Name",   l3:"Bride's Family",    l4:"Groom's Family",    l5:'Wedding Date',    p1:'e.g. Prajakta Nagpure', p2:'e.g. Ankit Gatthekar',  serviceLabel:'Wedding Ceremony' },
-  reception: { title:'✦ Step 2 — Reception / Party Details',     evTitle:'✦ Step 3 — Programme',           l1:'Host Name',           l2:'Co-host Name',        l3:"Host's Family",     l4:"Co-host's Family",  l5:'Event Date',      p1:'e.g. Sunita Deshpande', p2:'e.g. Ravi Deshpande',   serviceLabel:'Reception & Party' },
-  catering:  { title:'✦ Step 2 — Catering Event Details',        evTitle:'✦ Step 3 — Menu / Programme',    l1:'Primary Host',        l2:'Organisation / Co-host', l3:'Host Family',    l4:'Co-host Family',    l5:'Event Date',      p1:'e.g. Ramesh Sharma',    p2:'e.g. Hotel Grand',       serviceLabel:'Catering & Cuisine' },
-  corporate: { title:'✦ Step 2 — Corporate Event Details',       evTitle:'✦ Step 3 — Event Schedule',      l1:'Company / Organiser', l2:'Contact Person',      l3:'Department',        l4:'Sponsor / Partner', l5:'Event Date',      p1:'e.g. ABC Enterprises',  p2:'e.g. Rohit Verma',       serviceLabel:'Corporate Event' },
-  social:    { title:'✦ Step 2 — Social Celebration Details',    evTitle:'✦ Step 3 — Programme',           l1:'Host Name',           l2:'Co-host Name',        l3:"Host's Family",     l4:"Co-host's Family",  l5:'Celebration Date',p1:'e.g. Priya Mehta',      p2:'e.g. Rahul Mehta',       serviceLabel:'Social Celebration' },
-  lawn:      { title:'✦ Step 2 — Open Lawn Event Details',       evTitle:'✦ Step 3 — Event Schedule',      l1:'Host Name',           l2:'Co-host Name',        l3:"Host's Family",     l4:"Co-host's Family",  l5:'Event Date',      p1:'e.g. Vikram Joshi',     p2:'e.g. Neha Joshi',        serviceLabel:'Open Lawn Event' },
+  wedding:   { title:'✦ Step 2 — Wedding Invitation Details',    evTitle:'✦ Step 3 — Wedding Events',      l1:"Bride's Full Name",   l2:"Groom's Full Name",   l3:"Bride's Family",    l4:"Groom's Family",    l5:'Wedding Date',    p1:'e.g. Prajakta Nagpure', p2:'e.g. Ankit Gatthekar',  serviceLabel:'Wedding Ceremony',  defaultTheme:'royal',     eyebrow:'Auspicious Wedding Invitation', heroSub:'♥ weds ♥',       evLabel:'Wedding Events',    footerMsg:'Join us and share in our joy 💕' },
+  reception: { title:'✦ Step 2 — Reception / Party Details',     evTitle:'✦ Step 3 — Programme',           l1:'Host Name',           l2:'Co-host Name',        l3:"Host's Family",     l4:"Co-host's Family",  l5:'Event Date',      p1:'e.g. Sunita Deshpande', p2:'e.g. Ravi Deshpande',   serviceLabel:'Reception & Party', defaultTheme:'rose',      eyebrow:'You Are Cordially Invited',     heroSub:'invites you to',  evLabel:'Event Programme',   footerMsg:'See you at the celebration! 🥂' },
+  birthday:  { title:'✦ Step 2 — Birthday Invitation Details',   evTitle:'✦ Step 3 — Birthday Programme',  l1:"Birthday Star's Name",l2:'Hosted By',           l3:"Celebrant's Family",l4:'Organisers',        l5:'Birthday Date',   p1:'e.g. Arjun Sharma',     p2:'e.g. Sharma Family',     serviceLabel:'Birthday Party',    defaultTheme:'midnight',  eyebrow:'It\'s a Celebration!',          heroSub:'is turning',      evLabel:'Party Schedule',    footerMsg:'Come celebrate with us! 🎂🎉' },
+  corporate: { title:'✦ Step 2 — Corporate Event Details',       evTitle:'✦ Step 3 — Event Schedule',      l1:'Company / Organiser', l2:'Contact Person',      l3:'Department',        l4:'Sponsor / Partner', l5:'Event Date',      p1:'e.g. ABC Enterprises',  p2:'e.g. Rohit Verma',       serviceLabel:'Corporate Event',   defaultTheme:'emerald',   eyebrow:'Official Invitation',           heroSub:'cordially invites',evLabel:'Event Schedule',    footerMsg:'We look forward to your presence.' },
 };
 
 let currentInvType = 'wedding';
@@ -1434,10 +1517,8 @@ let currentInvType = 'wedding';
 const INV_TYPE_EVENTS = {
   wedding:   ['engagement','sangeet','haldi','mehendi','barat','wedding','reception','lunch','vidaai','custom'],
   reception: ['reception','lunch','sangeet','custom'],
-  catering:  ['lunch','reception','wedding','custom'],
+  birthday:  ['bday_main','bday_cake','bday_lunch','bday_games','bday_dance','custom'],
   corporate: ['custom'],
-  social:    ['sangeet','reception','lunch','custom'],
-  lawn:      ['wedding','reception','sangeet','lunch','custom'],
 };
 
 function selectInvType(type) {
@@ -1445,7 +1526,7 @@ function selectInvType(type) {
   const meta = INV_TYPE_META[type] || INV_TYPE_META.wedding;
 
   // Update button styles
-  ['wedding','reception','catering','corporate','social','lawn'].forEach(function(k) {
+  ['wedding','reception','birthday','corporate'].forEach(function(k) {
     var btn = document.getElementById('invtype_'+k);
     if(!btn) return;
     if(k === type) {
@@ -1473,6 +1554,16 @@ function selectInvType(type) {
 
   // Update hidden service type
   if(el('inv_service_type')) el('inv_service_type').value = type;
+
+  // Auto-select matching theme for this invitation type
+  if(meta.defaultTheme) {
+    var themeRadio = document.querySelector('input[name="inv_theme"][value="'+meta.defaultTheme+'"]');
+    if(themeRadio) {
+      themeRadio.checked = true;
+      // Visually highlight the new selected swatch
+      document.querySelectorAll('.inv-theme-swatch').forEach(function(sw){ sw.style.borderColor=''; sw.style.color=''; sw.style.background=''; });
+    }
+  }
 
   // Reset ALL events to valid presets for the new invitation type
   const typeEventKeys = INV_TYPE_EVENTS[type] || ['custom'];
@@ -1705,7 +1796,7 @@ async function createInvitation() {
   const defaultMsg = message || ('With the divine grace of the almighty, we joyfully invite you and your family to celebrate the auspicious wedding of '+bride+' & '+groom+'.');
   const serviceLabel = serviceType && INV_SERVICE_TYPES[serviceType] ? INV_SERVICE_TYPES[serviceType][cardLang] || INV_SERVICE_TYPES[serviceType].en : '';
 
-  const invHtml = buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr, timeStr, venue, address, mapLink, message:defaultMsg, events:invEvents, theme, slug, cardLang, serviceLabel });
+  const invHtml = buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr, timeStr, venue, address, mapLink, message:defaultMsg, events:invEvents, theme, slug, cardLang, serviceLabel, invType:currentInvType });
 
   // Upload HTML file
   let existingSha = null;
@@ -1771,11 +1862,11 @@ async function createInvitation() {
 async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, address, mapLink, message, events, theme, slug, cardLang, serviceLabel, tok }) {
   try {
     const themes = {
-      royal:    { bg:'#0D0A05', accent:'#C9A84C', accent2:'#E8C97A', text:'#F7F0E0', textm:'#D4C4A0' },
-      floral:   { bg:'#1A0A0F', accent:'#E8A0B4', accent2:'#F5C6D4', text:'#FFF0F3', textm:'#D4A0B0' },
-      emerald:  { bg:'#050F0A', accent:'#4CAF82', accent2:'#7ECB9F', text:'#F0FFF5', textm:'#A0C4B0' },
-      midnight: { bg:'#050814', accent:'#7B9FE8', accent2:'#A8C0F5', text:'#F0F4FF', textm:'#A0AED4' },
-      rose:     { bg:'#120A0C', accent:'#D4907A', accent2:'#E8B4A0', text:'#FFF5F2', textm:'#C4A098' },
+      royal:    { bg:'#0D0A05', accent:'#C9A84C', accent2:'#E8C97A', text:'#F7F0E0', textm:'#D4C4A0', emoji:'💍', emoji2:'🪷', ornament:'✦ ॐ ✦', evLabel:'Wedding Events', eyebrow:'Auspicious Wedding Invitation' },
+      floral:   { bg:'#1A0A0F', accent:'#E8A0B4', accent2:'#F5C6D4', text:'#FFF0F3', textm:'#D4A0B0', emoji:'🌸', emoji2:'🌺', ornament:'✿ ✿ ✿', evLabel:'Celebration Programme', eyebrow:'You Are Invited to Celebrate' },
+      emerald:  { bg:'#050F0A', accent:'#4CAF82', accent2:'#7ECB9F', text:'#F0FFF5', textm:'#A0C4B0', emoji:'🏢', emoji2:'✦', ornament:'— ✦ —', evLabel:'Event Agenda', eyebrow:'Official Invitation' },
+      midnight: { bg:'#050814', accent:'#7B9FE8', accent2:'#A8C0F5', text:'#F0F4FF', textm:'#A0AED4', emoji:'🎂', emoji2:'🎉', ornament:'★ · ★', evLabel:'Party Schedule', eyebrow:"It's a Celebration!" },
+      rose:     { bg:'#120A0C', accent:'#D4907A', accent2:'#E8B4A0', text:'#FFF5F2', textm:'#C4A098', emoji:'🥂', emoji2:'🎊', ornament:'· ✦ ·', evLabel:'Event Programme', eyebrow:'You Are Cordially Invited' },
     };
     const th = themes[theme] || themes.royal;
     const bg = th.bg, ac = th.accent, ac2 = th.accent2, tx = th.text, tm = th.textm;
@@ -1965,8 +2056,8 @@ async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, 
     };
 
     // Theme-specific petal emojis
-    var petalEmoji  = theme==='floral'?'🌸':theme==='emerald'?'🍃':theme==='midnight'?'✨':theme==='rose'?'🌹':'🌼';
-    var petalEmoji2 = theme==='floral'?'🌺':theme==='emerald'?'🌿':theme==='midnight'?'⭐':theme==='rose'?'🥀':'💛';
+    var petalEmoji  = th.emoji;
+    var petalEmoji2 = th.emoji2;
 
     // SVG floral background tile (inline base64)
     var svgPetal = '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80" viewBox="0 0 80 80">'
@@ -2052,17 +2143,17 @@ async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, 
           +floatPetals
           +cornerFloral
           +'<div style="'+S.inner+'">'
-            +(serviceLabel?'<p style="font-size:7pt;letter-spacing:3px;text-transform:uppercase;color:'+ac+';text-align:center;margin-bottom:6px;">'+serviceLabel+'</p>':'')
-            +'<span style="'+S.eyebrow+'">'+petalEmoji+' ✦ Auspicious Invitation ✦ '+petalEmoji+'</span>'
+            +(serviceLabel?'<p style="font-size:6.5pt;letter-spacing:3px;text-transform:uppercase;color:'+ac+';text-align:center;margin-bottom:5px;font-family:'+fontMain+',serif;">'+serviceLabel+'</p>':'')
+            +'<span style="'+S.eyebrow+'">'+petalEmoji+' '+th.eyebrow+' '+petalEmoji+'</span>'
             +'<div style="'+S.name+'">'+bride+'</div>'
-            +'<p style="'+S.weds+'">'+petalEmoji2+' ♥ weds ♥ '+petalEmoji2+'</p>'
+            +'<p style="'+S.weds+'">'+petalEmoji2+' '+th.ornament+' '+petalEmoji2+'</p>'
             +'<div style="'+S.name+'">'+groom+'</div>'
             +'<div style="'+S.divider+'"></div>'
-            +'<div style="text-align:center;"><span style="'+S.datebox+'">✦ '+dateStr+(timeStr?' · '+timeStr:'')+'</span></div>'
+            +'<div style="text-align:center;"><span style="'+S.datebox+'">'+th.emoji+' '+dateStr+(timeStr?' · '+timeStr:'')+'</span></div>'
             +'<p style="'+S.venue+'">📍 '+venue+'</p>'
             +'<p style="'+S.msg+'">'+petalEmoji+' '+message.slice(0,180)+' '+petalEmoji+'</p>'
             +(evRows
-              ?'<p style="'+S.sTitle+'">'+petalEmoji2+' Events &amp; Programme '+petalEmoji2+'</p>'
+              ?'<p style="'+S.sTitle+'">'+petalEmoji2+' '+th.evLabel+' '+petalEmoji2+'</p>'
                +'<table style="width:100%;border-collapse:collapse;">'+evRows+'</table>'
               :'')
             +'<p style="'+S.sTitle+'">📍 Venue</p>'
@@ -2109,13 +2200,58 @@ function setInvStatus(msg, cls) {
 }
 
 // ── INVITATION HTML BUILDER ───────────────────────────────────────────────
-function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr, timeStr, venue, address, mapLink, message, events, theme, slug, cardLang, serviceLabel }) {
+function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr, timeStr, venue, address, mapLink, message, events, theme, slug, cardLang, serviceLabel, invType }) {
   const themes = {
-    royal:    { bg:'#0D0A05', bg2:'#1A1409', accent:'#C9A84C', accent2:'#E8C97A', text:'#F7F0E0', textMid:'#D4C4A0', pat:'rgba(201,168,76,0.06)', emoji:'👑', font:'Cinzel', bodyFont:'Cormorant+Garamond:ital,wght@0,400;0,600;1,400' },
-    floral:   { bg:'#1a0a0f', bg2:'#2a0f18', accent:'#e8a0b4', accent2:'#f5c6d4', text:'#fff0f3', textMid:'#d4a0b0', pat:'rgba(232,160,180,0.06)', emoji:'🌸', font:'Playfair+Display:wght@400;700', bodyFont:'Lora:ital,wght@0,400;1,400' },
-    emerald:  { bg:'#050f0a', bg2:'#0a1f14', accent:'#4CAF82', accent2:'#7ecb9f', text:'#f0fff5', textMid:'#a0c4b0', pat:'rgba(76,175,130,0.06)', emoji:'🌿', font:'Cormorant+Garamond:wght@600;700', bodyFont:'Libre+Baskerville:ital,wght@0,400;1,400' },
-    midnight: { bg:'#050814', bg2:'#0a1028', accent:'#7b9fe8', accent2:'#a8c0f5', text:'#f0f4ff', textMid:'#a0aed4', pat:'rgba(123,159,232,0.06)', emoji:'🌙', font:'Josefin+Sans:wght@300;600', bodyFont:'Crimson+Text:ital,wght@0,400;1,400' },
-    rose:     { bg:'#120a0c', bg2:'#1f1013', accent:'#d4907a', accent2:'#e8b4a0', text:'#fff5f2', textMid:'#c4a098', pat:'rgba(212,144,122,0.06)', emoji:'🥀', font:'Italiana', bodyFont:'Cormorant+Garamond:ital,wght@0,400;1,400' },
+    royal:    {
+      bg:'#0D0A05', bg2:'#1A1409', accent:'#C9A84C', accent2:'#E8C97A', text:'#F7F0E0', textMid:'#D4C4A0',
+      pat:'rgba(201,168,76,0.06)', emoji:'💍', emoji2:'🪷',
+      font:'Cinzel', bodyFont:'Cormorant+Garamond:ital,wght@0,400;0,600;1,400',
+      heroPattern:'radial-gradient(ellipse at 50% 0%,rgba(201,168,76,0.12) 0%,transparent 70%)',
+      ornamentTop:'✦ ॐ ✦', ornamentDiv:'⸻ ✦ ⸻',
+      heroEyebrow:'Auspicious Wedding Ceremony', heroConnector:'♥ weds ♥',
+      evLabel:'Wedding Events & Programme', ctdLabel:'Counting Down to the Big Day',
+      footerMsg:'Join us as we begin a lifetime of love & togetherness 💕',
+    },
+    floral:   {
+      bg:'#1a0a0f', bg2:'#2a0f18', accent:'#e8a0b4', accent2:'#f5c6d4', text:'#fff0f3', textMid:'#d4a0b0',
+      pat:'rgba(232,160,180,0.06)', emoji:'🌸', emoji2:'🌺',
+      font:'Playfair+Display:wght@400;700', bodyFont:'Lora:ital,wght@0,400;1,400',
+      heroPattern:'radial-gradient(ellipse at 50% 0%,rgba(232,160,180,0.15) 0%,transparent 70%)',
+      ornamentTop:'🌸 ✿ 🌸', ornamentDiv:'~ ✿ ~',
+      heroEyebrow:'You Are Invited to Celebrate', heroConnector:'& ',
+      evLabel:'Celebration Programme', ctdLabel:'The Big Day Arrives In',
+      footerMsg:'With love & beautiful memories ahead 🌸',
+    },
+    emerald:  {
+      bg:'#050f0a', bg2:'#0a1f14', accent:'#4CAF82', accent2:'#7ecb9f', text:'#f0fff5', textMid:'#a0c4b0',
+      pat:'rgba(76,175,130,0.06)', emoji:'🏢', emoji2:'✦',
+      font:'Cormorant+Garamond:wght@600;700', bodyFont:'Libre+Baskerville:ital,wght@0,400;1,400',
+      heroPattern:'linear-gradient(180deg,rgba(76,175,130,0.08) 0%,transparent 60%)',
+      ornamentTop:'— ✦ —', ornamentDiv:'— ✦ —',
+      heroEyebrow:'Official Invitation', heroConnector:'presents',
+      evLabel:'Event Agenda', ctdLabel:'Event Commences In',
+      footerMsg:'We look forward to your esteemed presence.',
+    },
+    midnight: {
+      bg:'#050814', bg2:'#0a1028', accent:'#7b9fe8', accent2:'#a8c0f5', text:'#f0f4ff', textMid:'#a0aed4',
+      pat:'rgba(123,159,232,0.06)', emoji:'🎂', emoji2:'🎉',
+      font:'Josefin+Sans:wght@300;600', bodyFont:'Crimson+Text:ital,wght@0,400;1,400',
+      heroPattern:'radial-gradient(ellipse at 30% 30%,rgba(123,159,232,0.18) 0%,transparent 60%)',
+      ornamentTop:'★ · · ★', ornamentDiv:'· · ·',
+      heroEyebrow:"It's a Celebration!", heroConnector:'is turning',
+      evLabel:'Party Schedule', ctdLabel:'Party Begins In',
+      footerMsg:"Come, eat cake, and dance the night away! 🎉🎂",
+    },
+    rose:     {
+      bg:'#120a0c', bg2:'#1f1013', accent:'#d4907a', accent2:'#e8b4a0', text:'#fff5f2', textMid:'#c4a098',
+      pat:'rgba(212,144,122,0.06)', emoji:'🥂', emoji2:'🎊',
+      font:'Italiana', bodyFont:'Cormorant+Garamond:ital,wght@0,400;1,400',
+      heroPattern:'radial-gradient(ellipse at 50% 20%,rgba(212,144,122,0.15) 0%,transparent 65%)',
+      ornamentTop:'✦ ✦ ✦', ornamentDiv:'· ✦ ·',
+      heroEyebrow:'You Are Cordially Invited', heroConnector:'& family invite you to',
+      evLabel:'Event Programme', ctdLabel:'The Celebration Begins In',
+      footerMsg:'See you at the celebration! 🥂',
+    },
   };
   const t = themes[theme] || themes.royal;
   const fontMain = t.font.split(':')[0];
@@ -2161,8 +2297,8 @@ function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr,
     '<head>',
     '<meta charset="UTF-8"/>',
     '<meta name="viewport" content="width=device-width,initial-scale=1"/>',
-    '<title>'+bride+' weds '+groom+' | '+dateStr+'</title>',
-    '<meta property="og:title" content="'+bride+' weds '+groom+' | '+dateStr+'"/>',
+    '<title>'+bride+(theme==='midnight'?' — '+groom:' weds '+groom)+' | '+dateStr+'</title>',
+    '<meta property="og:title" content="'+bride+(theme==='midnight'?' — '+groom+' | Birthday':' weds '+groom)+' | '+dateStr+'"/>',
     '<meta property="og:description" content="'+message.slice(0,120)+' · Venue: Krishnam Lawns &amp; Banquets, Nagpur"/>',
     '<meta property="og:site_name" content="Krishnam Lawns &amp; Banquets — Nagpur"/>',
     '<link href="https://fonts.googleapis.com/css2?family='+t.font+'&family='+t.bodyFont+'&family=Raleway:wght@300;400;600&display=swap" rel="stylesheet"/>',
@@ -2171,33 +2307,41 @@ function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr,
     ':root{--bg:'+t.bg+';--bg2:'+t.bg2+';--accent:'+t.accent+';--accent2:'+t.accent2+';--text:'+t.text+';--textm:'+t.textMid+';--pat:'+t.pat+';}',
     'html{scroll-behavior:smooth;}',
     'body{background:var(--bg);color:var(--text);font-family:"Raleway",sans-serif;overflow-x:hidden;min-height:100vh;}',
+    // hero gradient overlay
+    '.hero-bg{position:fixed;top:0;left:0;width:100%;height:60vh;background:'+t.heroPattern+';pointer-events:none;z-index:0;}',
     'body::before{content:"";position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox=\'0 0 200 200\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cfilter id=\'n\'%3E%3CfeTurbulence type=\'fractalNoise\' baseFrequency=\'0.9\' numOctaves=\'4\'/%3E%3C/filter%3E%3Crect width=\'100%25\' height=\'100%25\' filter=\'url(%23n)\' opacity=\'0.04\'/%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:0.4;}',
     '.petal{position:fixed;top:-40px;font-size:1.2rem;animation:fall linear infinite;pointer-events:none;z-index:1;opacity:0.7;}',
     '@keyframes fall{0%{transform:translateY(-40px) rotate(0deg) translateX(0);opacity:0.8;}100%{transform:translateY(110vh) rotate(720deg) translateX(60px);opacity:0;}}',
     '.page{position:relative;z-index:2;max-width:680px;margin:0 auto;padding:0 20px 60px;}',
     '.hero{text-align:center;padding:60px 20px 40px;position:relative;}',
-    '.hero-ornament{font-size:2.5rem;margin-bottom:16px;animation:float 4s ease-in-out infinite;}',
+    '.hero-ornament{font-size:2.8rem;margin-bottom:8px;animation:float 4s ease-in-out infinite;display:block;}',
+    '.hero-ornament-top{font-size:0.75rem;letter-spacing:0.4em;color:var(--accent);opacity:0.7;margin-bottom:18px;display:block;}',
     '@keyframes float{0%,100%{transform:translateY(0);}50%{transform:translateY(-8px);}}',
     '.hero-eyebrow{font-size:0.62rem;letter-spacing:0.5em;text-transform:uppercase;color:var(--accent);margin-bottom:20px;opacity:0;animation:fadeUp 1s 0.3s ease both;}',
     '.names-wrap{margin-bottom:16px;}',
     '.bride-name,.groom-name{font-family:"'+fontMain+'",serif;font-size:clamp(2.2rem,8vw,4rem);color:var(--text);line-height:1.05;opacity:0;animation:fadeUp 1s ease both;}',
     '.bride-name{animation-delay:0.5s;}.groom-name{animation-delay:0.9s;}',
-    '.weds-text{font-size:0.9rem;letter-spacing:0.4em;text-transform:uppercase;color:var(--accent);margin:8px 0;opacity:0;animation:fadeUp 1s 0.7s ease both;}',
-    '.hero-divider{width:100px;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent);margin:20px auto;opacity:0;animation:fadeUp 1s 1.1s ease both;}',
-    '.date-badge{display:inline-block;border:1px solid rgba(255,255,255,0.1);padding:10px 28px;font-size:0.75rem;letter-spacing:0.3em;text-transform:uppercase;color:var(--accent2);margin-bottom:8px;opacity:0;animation:fadeUp 1s 1.3s ease both;}',
+    '.weds-text{font-size:0.85rem;letter-spacing:0.35em;text-transform:uppercase;color:var(--accent);margin:10px 0;opacity:0;animation:fadeUp 1s 0.7s ease both;}',
+    '.hero-divider{display:flex;align-items:center;justify-content:center;gap:12px;margin:20px auto;opacity:0;animation:fadeUp 1s 1.1s ease both;}',
+    '.hero-divider::before,.hero-divider::after{content:"";flex:1;max-width:80px;height:1px;background:linear-gradient(90deg,transparent,var(--accent));}',
+    '.hero-divider::after{background:linear-gradient(90deg,var(--accent),transparent);}',
+    '.hero-div-dot{font-size:0.7rem;color:var(--accent);letter-spacing:0.2em;}',
+    '.date-badge{display:inline-block;border:1px solid rgba(255,255,255,0.12);padding:10px 28px;font-size:0.75rem;letter-spacing:0.3em;text-transform:uppercase;color:var(--accent2);margin-bottom:8px;opacity:0;animation:fadeUp 1s 1.3s ease both;background:rgba(255,255,255,0.02);}',
     '.venue-hero{font-family:"'+fontBody+'",serif;font-style:italic;font-size:1.1rem;color:var(--textm);opacity:0;animation:fadeUp 1s 1.5s ease both;}',
-    '.message-text{font-family:"'+fontBody+'",serif;font-style:italic;font-size:1.05rem;color:var(--textm);line-height:1.8;max-width:480px;margin:24px auto 0;opacity:0;animation:fadeUp 1s 1.7s ease both;}',
-    '.countdown-wrap{background:var(--pat);border:1px solid rgba(255,255,255,0.06);padding:28px 20px;margin:32px 0;text-align:center;}',
-    '.countdown-label{font-size:0.6rem;letter-spacing:0.4em;text-transform:uppercase;color:var(--accent);margin-bottom:18px;}',
+    '.message-text{font-family:"'+fontBody+'",serif;font-style:italic;font-size:1.05rem;color:var(--textm);line-height:1.8;max-width:500px;margin:24px auto 0;opacity:0;animation:fadeUp 1s 1.7s ease both;}',
+    '.countdown-wrap{background:'+t.pat+';border:1px solid rgba(255,255,255,0.06);padding:28px 20px;margin:32px 0;text-align:center;position:relative;overflow:hidden;}',
+    '.countdown-wrap::before{content:"'+t.ornamentTop+'";position:absolute;top:10px;left:50%;transform:translateX(-50%);font-size:0.65rem;letter-spacing:0.3em;color:var(--accent);opacity:0.4;}',
+    '.countdown-label{font-size:0.6rem;letter-spacing:0.4em;text-transform:uppercase;color:var(--accent);margin-bottom:18px;padding-top:10px;}',
     '.countdown-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:360px;margin:0 auto;}',
-    '.cd-unit{text-align:center;}',
+    '.cd-unit{text-align:center;padding:10px 6px;border:1px solid rgba(255,255,255,0.04);background:rgba(0,0,0,0.15);}',
     '.cd-num{font-family:"'+fontMain+'",serif;font-size:clamp(1.6rem,5vw,2.4rem);color:var(--accent);line-height:1;display:block;}',
-    '.cd-lbl{font-size:0.55rem;letter-spacing:0.25em;text-transform:uppercase;color:var(--textm);margin-top:4px;display:block;}',
+    '.cd-lbl{font-size:0.52rem;letter-spacing:0.25em;text-transform:uppercase;color:var(--textm);margin-top:6px;display:block;}',
     '.events-section{margin:36px 0;}',
-    '.section-label{font-family:"'+fontMain+'",serif;font-size:0.9rem;letter-spacing:0.2em;text-transform:uppercase;color:var(--accent);text-align:center;margin-bottom:28px;}',
+    '.section-label{font-family:"'+fontMain+'",serif;font-size:0.9rem;letter-spacing:0.2em;text-transform:uppercase;color:var(--accent);text-align:center;margin-bottom:28px;display:flex;align-items:center;justify-content:center;gap:14px;}',
+    '.section-label::before,.section-label::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--accent),transparent);}',
     '.ev-item{display:grid;grid-template-columns:70px 14px 1fr;gap:0 14px;align-items:start;margin-bottom:20px;opacity:0;animation:fadeUp 0.8s ease both;}',
     '.ev-item.ev-highlight .ev-content{border-left:2px solid var(--accent);padding-left:12px;}',
-    '.ev-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);margin-top:5px;box-shadow:0 0 8px var(--accent);}',
+    '.ev-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);margin-top:5px;box-shadow:0 0 10px var(--accent);}',
     '.ev-date{font-size:0.7rem;letter-spacing:0.12em;color:var(--accent2);text-align:right;padding-top:2px;line-height:1.4;}',
     '.ev-name{font-family:"'+fontMain+'",serif;font-size:1rem;color:var(--text);margin-bottom:2px;}',
     '.ev-name-hi{font-size:0.78rem;color:var(--textm);margin-bottom:4px;}',
@@ -2207,7 +2351,8 @@ function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr,
     '.venue-card{border:1px solid rgba(255,255,255,0.08);padding:20px;margin:16px 0;background:var(--pat);}',
     '.venue-name{font-family:"'+fontMain+'",serif;font-size:1.1rem;color:var(--text);margin-bottom:6px;}',
     '.venue-addr{font-size:0.78rem;color:var(--textm);line-height:1.6;}',
-    '.map-btn{display:inline-block;background:linear-gradient(135deg,var(--accent),var(--accent2));color:var(--bg);padding:11px 28px;font-size:0.7rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;text-decoration:none;margin-top:10px;transition:all 0.3s;}',
+    '.map-btn{display:inline-block;background:linear-gradient(135deg,var(--accent),var(--accent2));color:var(--bg);padding:12px 32px;font-size:0.7rem;font-weight:700;letter-spacing:0.2em;text-transform:uppercase;text-decoration:none;margin-top:10px;transition:all 0.3s;box-shadow:0 4px 16px rgba(0,0,0,0.3);}',
+    '.map-btn:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,0.4);}',
     '.family-section{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin:32px 0;}',
     '.family-card{text-align:center;border:1px solid rgba(255,255,255,0.06);padding:20px 12px;background:var(--pat);}',
     '.family-role{font-size:0.58rem;letter-spacing:0.3em;text-transform:uppercase;color:var(--accent);margin-bottom:8px;}',
@@ -2215,47 +2360,50 @@ function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr,
     '.inv-footer{text-align:center;padding:32px 20px;border-top:1px solid rgba(255,255,255,0.06);margin-top:40px;}',
     '.inv-footer p{font-family:"'+fontBody+'",serif;font-style:italic;font-size:0.9rem;color:var(--textm);margin-bottom:6px;}',
     '.inv-footer small{font-size:0.58rem;letter-spacing:0.2em;text-transform:uppercase;color:rgba(255,255,255,0.2);}',
-    '.venue-logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:20px;}',
-    '.venue-logo span{font-family:"'+fontMain+'",serif;font-size:0.8rem;letter-spacing:0.2em;color:var(--accent);}',
-    '.venue-brand-card{border:1px solid rgba(255,255,255,0.06);padding:20px;margin:24px auto 0;max-width:400px;background:var(--pat);text-align:center;}',
-    '.venue-brand-title{font-family:"'+fontMain+'",serif;font-size:0.95rem;letter-spacing:0.18em;color:var(--accent);margin-bottom:6px;}',
-    '.venue-brand-sub{font-size:0.65rem;letter-spacing:0.2em;text-transform:uppercase;color:var(--textm);margin-bottom:12px;}',
+    '.venue-brand-card{border:1px solid rgba(255,255,255,0.07);padding:22px 20px;margin:24px auto 0;max-width:420px;background:'+t.pat+';text-align:center;}',
+    '.venue-brand-title{font-family:"'+fontMain+'",serif;font-size:0.95rem;letter-spacing:0.18em;color:var(--accent);margin-bottom:4px;}',
+    '.venue-brand-sub{font-size:0.62rem;letter-spacing:0.18em;text-transform:uppercase;color:var(--textm);margin-bottom:12px;}',
     '.venue-brand-contact{font-size:0.72rem;color:var(--textm);line-height:1.8;}',
     '.venue-brand-contact a{color:var(--accent);text-decoration:none;}',
     '.venue-services{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:10px;}',
-    '.venue-service-tag{font-size:0.55rem;letter-spacing:0.18em;text-transform:uppercase;border:1px solid rgba(255,255,255,0.1);padding:4px 10px;color:var(--textm);}',
+    '.venue-service-tag{font-size:0.52rem;letter-spacing:0.16em;text-transform:uppercase;border:1px solid rgba(255,255,255,0.08);padding:4px 10px;color:var(--textm);}',
     '.rings{position:fixed;pointer-events:none;z-index:1;}',
     '.rings.top-left{top:-80px;left:-80px;} .rings.bot-right{bottom:-80px;right:-80px;}',
     '.ring-dec{position:absolute;border-radius:50%;border:1px solid;}',
     '@keyframes fadeUp{from{opacity:0;transform:translateY(24px);}to{opacity:1;transform:translateY(0);}}',
     '@keyframes rotate-ring{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}',
+    '@keyframes pulse{0%,100%{opacity:0.5;transform:scale(1);}50%{opacity:1;transform:scale(1.15);}}',
     '</style>',
     '</head>',
     '<body>',
+    '<div class="hero-bg"></div>',
     '<div id="petals"></div>',
     '<div class="rings top-left">',
-    '  <div class="ring-dec" style="width:220px;height:220px;border-color:'+t.pat+';animation:rotate-ring 30s linear infinite;top:0;left:0;"></div>',
-    '  <div class="ring-dec" style="width:140px;height:140px;border-color:'+t.pat+';animation:rotate-ring 20s linear infinite reverse;top:40px;left:40px;"></div>',
+    '  <div class="ring-dec" style="width:240px;height:240px;border-color:'+t.pat+';animation:rotate-ring 30s linear infinite;top:0;left:0;"></div>',
+    '  <div class="ring-dec" style="width:150px;height:150px;border-color:'+t.pat+';animation:rotate-ring 20s linear infinite reverse;top:45px;left:45px;"></div>',
+    '  <div class="ring-dec" style="width:80px;height:80px;border-color:rgba(255,255,255,0.03);animation:rotate-ring 15s linear infinite;top:80px;left:80px;"></div>',
     '</div>',
     '<div class="rings bot-right">',
-    '  <div class="ring-dec" style="width:180px;height:180px;border-color:'+t.pat+';animation:rotate-ring 25s linear infinite;bottom:0;right:0;"></div>',
+    '  <div class="ring-dec" style="width:200px;height:200px;border-color:'+t.pat+';animation:rotate-ring 25s linear infinite;bottom:0;right:0;"></div>',
+    '  <div class="ring-dec" style="width:110px;height:110px;border-color:'+t.pat+';animation:rotate-ring 18s linear infinite reverse;bottom:45px;right:45px;"></div>',
     '</div>',
     '<div class="page">',
     '  <div class="hero">',
-    '    <div class="hero-ornament">'+t.emoji+'</div>',
-    '    <p class="hero-eyebrow">Auspicious Wedding Ceremony</p>',
+    '    <span class="hero-ornament-top">'+t.ornamentTop+'</span>',
+    '    <span class="hero-ornament">'+t.emoji+'</span>',
+    '    <p class="hero-eyebrow">'+t.heroEyebrow+(serviceLabel?' · '+serviceLabel:'')+'</p>',
     '    <div class="names-wrap">',
     '      <div class="bride-name">'+bride+'</div>',
-    '      <div class="weds-text">♥ weds ♥</div>',
+    '      <div class="weds-text">'+t.heroConnector+'</div>',
     '      <div class="groom-name">'+groom+'</div>',
     '    </div>',
-    '    <div class="hero-divider"></div>',
-    '    <div class="date-badge">✦ '+dateStr+(timeStr?' · '+timeStr:'')+'</div>',
+    '    <div class="hero-divider"><span class="hero-div-dot">'+t.ornamentDiv+'</span></div>',
+    '    <div class="date-badge">'+t.emoji2+' '+dateStr+(timeStr?' · '+timeStr:'')+'</div>',
     '    <div class="venue-hero">📍 '+venue+'</div>',
     '    <p class="message-text">'+message+'</p>',
     '  </div>',
     '  <div class="countdown-wrap">',
-    '    <div class="countdown-label">Counting Down to the Big Day</div>',
+    '    <div class="countdown-label">'+t.ctdLabel+'</div>',
     '    <div class="countdown-grid">',
     '      <div class="cd-unit"><span class="cd-num" id="cd-days">--</span><span class="cd-lbl">Days</span></div>',
     '      <div class="cd-unit"><span class="cd-num" id="cd-hrs">--</span><span class="cd-lbl">Hours</span></div>',
@@ -2263,24 +2411,23 @@ function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr,
     '      <div class="cd-unit"><span class="cd-num" id="cd-sec">--</span><span class="cd-lbl">Seconds</span></div>',
     '    </div>',
     '  </div>',
-    eventsHTML ? '  <div class="events-section"><h3 class="section-label">Wedding Events</h3>'+eventsHTML+'</div>' : '',
+    eventsHTML ? '  <div class="events-section"><h3 class="section-label">'+t.evLabel+'</h3>'+eventsHTML+'</div>' : '',
     '  <div class="family-section">',
-    '    <div class="family-card"><div class="family-role">Bride\'s Family</div><div class="family-name">'+brideFamName+'</div></div>',
-    '    <div class="family-card"><div class="family-role">Groom\'s Family</div><div class="family-name">'+groomFamName+'</div></div>',
+    '    <div class="family-card"><div class="family-role">'+brideFamName+'</div><div class="family-name">'+bride+'</div></div>',
+    '    <div class="family-card"><div class="family-role">'+groomFamName+'</div><div class="family-name">'+groom+'</div></div>',
     '  </div>',
     mapSection,
     '  <div class="inv-footer">',
-    '    <p>Join us and share in our joy 💕</p>',
-    '    <p>We look forward to celebrating with you!</p>',
+    '    <p>'+t.footerMsg+'</p>',
     '    <div class="venue-brand-card">',
     '      <div class="venue-brand-title">Krishnam Lawns &amp; Banquets</div>',
     '      <div class="venue-brand-sub">Hudkeshwar, Nagpur · Nagpur\'s Premier Venue</div>',
     '      <div class="venue-services">',
-    '        <span class="venue-service-tag">Wedding Ceremonies</span>',
-    '        <span class="venue-service-tag">Reception &amp; Party</span>',
+    '        <span class="venue-service-tag">Weddings</span>',
+    '        <span class="venue-service-tag">Receptions</span>',
     '        <span class="venue-service-tag">Open Lawn</span>',
     '        <span class="venue-service-tag">Catering</span>',
-    '        <span class="venue-service-tag">Corporate Events</span>',
+    '        <span class="venue-service-tag">Corporate</span>',
     '      </div>',
     '      <div class="venue-brand-contact" style="margin-top:12px;">',
     '        <a href="tel:+918888883587">+91 88888 83587</a> &nbsp;·&nbsp;',
@@ -2303,7 +2450,7 @@ function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr,
     '  document.getElementById("cd-sec").textContent=String(s).padStart(2,"0");',
     '}',
     'tick();setInterval(tick,1000);',
-    'var emojis=["'+t.emoji+'","✨","🌸","💫","🌺","💐"];',
+    'var emojis=["'+t.emoji+'","'+t.emoji2+'","✨","💫","🌟"];',
     'for(var i=0;i<18;i++){',
     '  var p=document.createElement("div");',
     '  p.className="petal";',
