@@ -1743,19 +1743,33 @@ async function saveTokens(list, tok) {
 async function generateTokenLink() {
   const label = document.getElementById('token_label')?.value.trim() || 'Guest';
   const tok = await getToken();
-  if(!tok) { document.getElementById('tokenStatus').textContent = '✕ Save your GitHub token first.'; return; }
-  document.getElementById('tokenStatus').textContent = 'Generating…';
+  if(!tok) { document.getElementById('tokenStatus').textContent = '✕ Save your GitHub token first (Upload Media tab).'; return; }
+  const statusEl = document.getElementById('tokenStatus');
+  statusEl.textContent = 'Generating…';
   const tokens = await fetchTokens();
-  // Generate random 24-char token
-  const id = Array.from(crypto.getRandomValues(new Uint8Array(18))).map(b=>b.toString(36)).join('').slice(0,24);
+  // Generate random 24-char token using alphanumeric only (URL safe)
+  const arr = crypto.getRandomValues(new Uint8Array(32));
+  const id = Array.from(arr).map(b => '0123456789abcdefghijklmnopqrstuvwxyz'[b % 36]).join('').slice(0,28);
   const expiry = new Date(Date.now() + 2*24*60*60*1000).toISOString(); // 2 days
   tokens.push({ id, label, expiry, used:false, created:new Date().toISOString() });
   await saveTokens(tokens, tok);
-  const link = `${location.origin}${location.pathname}?inv_token=${id}`;
-  document.getElementById('tokenStatus').textContent = '';
-  renderTokenList(tokens);
+  // Build clean link (strip any existing query params from current URL)
+  const base = location.origin + location.pathname;
+  const link = `${base}?inv_token=${id}`;
+  await renderTokenList(tokens);
   // Auto-copy
-  try { await navigator.clipboard.writeText(link); document.getElementById('tokenStatus').textContent = '✅ Link copied to clipboard!'; setTimeout(()=>{document.getElementById('tokenStatus').textContent='';},3000); } catch(e){}
+  try {
+    await navigator.clipboard.writeText(link);
+    statusEl.textContent = '✅ Link generated & copied! Share it with: ' + label;
+    statusEl.style.color = '#7ecb8f';
+  } catch(e) {
+    statusEl.textContent = '✅ Generated! Copy the link above and share with: ' + label;
+    statusEl.style.color = '#7ecb8f';
+  }
+  setTimeout(()=>{ statusEl.textContent=''; statusEl.style.color=''; }, 5000);
+  // Clear label field
+  const labelEl = document.getElementById('token_label');
+  if(labelEl) labelEl.value = '';
 }
 
 async function revokeToken(id) {
@@ -2797,18 +2811,48 @@ async function cacheInvitesForDecor() {
 })();
 
 async function showTokenForm(tokenId) {
-  // Validate token from GitHub
+  // Show loading state immediately
+  document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;">
+    <div style="font-size:2rem;margin-bottom:20px;animation:spin 1s linear infinite;display:inline-block;">⏳</div>
+    <p style="color:#D4C4A0;font-family:Raleway,sans-serif;">Verifying your link…</p>
+    <style>@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}</style>
+  </div>`;
+  document.body.style.cssText = 'background:#0D0A05;color:#F7F0E0;font-family:Raleway,sans-serif;margin:0;padding:0;min-height:100vh;';
+
+  // Validate token using GitHub Contents API (always fresh, no CDN cache, no auth needed for public repos)
   let tokenData = null;
+  let fetchError = false;
   try {
-    const res = await fetch(`${RAW_BASE}/${INV_FOLDER}/tokens.json?_=${Date.now()}`);
+    const res = await fetch(`${API_BASE}/${INV_FOLDER}/tokens.json?ref=${GH_BRANCH}&_=${Date.now()}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache' }
+    });
     if(res.ok) {
-      const list = await res.json();
-      tokenData = list.find(t => t.id === tokenId);
+      const file = await res.json();
+      const list = JSON.parse(atob(file.content.replace(/\n/g,'')));
+      tokenData = list.find(t => t.id === tokenId) || null;
+    } else if(res.status === 404) {
+      // tokens.json doesn't exist yet — no tokens have been generated
+      tokenData = null;
+    } else {
+      fetchError = true;
     }
-  } catch(e) {}
+  } catch(e) {
+    fetchError = true;
+  }
 
   document.body.innerHTML = ''; // Clear entire site
-  document.body.style.cssText = 'background:#0D0A05;color:#F7F0E0;font-family:Raleway,sans-serif;margin:0;padding:0;min-height:100vh;';
+
+  if(fetchError) {
+    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;">
+      <div style="font-size:3rem;margin-bottom:20px;">📶</div>
+      <h2 style="font-family:Cinzel,serif;color:#e07070;margin-bottom:12px;">Network Error</h2>
+      <p style="color:#D4C4A0;">Could not verify your link. Please check your internet connection and try again.</p>
+      <p style="margin-top:16px;"><a href="${location.href}" style="color:#C9A84C;font-size:0.8rem;">↺ Retry</a></p>
+      <p style="margin-top:24px;font-size:0.8rem;color:#C9A84C;">+91 88888 83587</p>
+    </div>`;
+    return;
+  }
 
   if(!tokenData) {
     document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;">
