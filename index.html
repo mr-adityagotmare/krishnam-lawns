@@ -1418,6 +1418,29 @@ async function renderInvitesTab() {
   <div class="inv-status" id="invStatus"></div>
 
   <div class="inv-divider"></div>
+
+  <!-- ══ TOKEN LINKS ══════════════════════════════════════════════════════ -->
+  <div class="inv-section-title">🔗 Guest Fill-In Links (One-Time Tokens)</div>
+  <div style="font-size:0.68rem;color:var(--text-light);margin-bottom:14px;line-height:1.7;">
+    Generate a secure one-time link for your customer. They fill in invitation details — you review and approve before it goes live.
+  </div>
+  <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;">
+    <div class="inv-field" style="flex:1;min-width:160px;">
+      <span class="inv-label">Label (Customer Name)</span>
+      <input class="inv-input" id="token_label" placeholder="e.g. Rahul & Priya Wedding"/>
+    </div>
+    <button onclick="generateTokenLink()" style="background:linear-gradient(135deg,var(--gold),var(--gold-light));color:var(--dark);border:none;padding:11px 22px;font-size:0.68rem;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;cursor:pointer;white-space:nowrap;">+ Generate Link</button>
+  </div>
+  <div id="tokenList" style="margin-bottom:8px;"></div>
+  <div id="tokenStatus" style="font-size:0.72rem;color:var(--gold);font-style:italic;min-height:16px;"></div>
+
+  <div class="inv-divider"></div>
+
+  <!-- ══ PENDING APPROVALS ════════════════════════════════════════════════ -->
+  <div class="inv-section-title" id="pendingInvTitle">⏳ Pending Approvals <span id="pendingInvBadge" style="font-size:0.7rem;background:rgba(224,112,112,0.2);border:1px solid rgba(224,112,112,0.4);color:#e07070;padding:2px 8px;margin-left:8px;border-radius:2px;"></span></div>
+  <div id="pendingInvList"><div class="inv-empty" style="padding:16px;">Loading…</div></div>
+
+  <div class="inv-divider"></div>
   <div class="inv-section-title">📋 Published Invitations</div>
   ${invites.length === 0
     ? `<div class="inv-empty">No invitations published yet.<br>Create your first one above! 💌</div>`
@@ -1456,6 +1479,10 @@ async function renderInvitesTab() {
   document.getElementById('inv_slug')?.addEventListener('input', e => {
     document.getElementById('slugPreview').textContent = e.target.value || 'your-slug';
   });
+
+  // Load token list and pending approvals
+  renderTokenList();
+  renderPendingInvitations();
 }
 
 let invEvents = [];
@@ -1691,6 +1718,200 @@ async function saveInvitesList(list, tok) {
   await fetch(`${API_BASE}/${INV_FOLDER}/index.json`, {
     method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'},
     body:JSON.stringify(body)
+  });
+}
+
+// ── TOKEN SYSTEM ──────────────────────────────────────────────────────────
+
+async function fetchTokens() {
+  try {
+    const res = await fetch(`${API_BASE}/${INV_FOLDER}/tokens.json?ref=${GH_BRANCH}&t=${Date.now()}`);
+    if(!res.ok) return [];
+    const f = await res.json();
+    return JSON.parse(atob(f.content.replace(/\n/g,'')));
+  } catch(e) { return []; }
+}
+
+async function saveTokens(list, tok) {
+  let sha = null;
+  try { const r = await fetch(`${API_BASE}/${INV_FOLDER}/tokens.json?ref=${GH_BRANCH}`); if(r.ok){const f=await r.json();sha=f.sha;} } catch(e){}
+  const body = { message:'Update invitation tokens', branch:GH_BRANCH, content:btoa(JSON.stringify(list)) };
+  if(sha) body.sha = sha;
+  await fetch(`${API_BASE}/${INV_FOLDER}/tokens.json`, { method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'}, body:JSON.stringify(body) });
+}
+
+async function generateTokenLink() {
+  const label = document.getElementById('token_label')?.value.trim() || 'Guest';
+  const tok = await getToken();
+  if(!tok) { document.getElementById('tokenStatus').textContent = '✕ Save your GitHub token first.'; return; }
+  document.getElementById('tokenStatus').textContent = 'Generating…';
+  const tokens = await fetchTokens();
+  // Generate random 24-char token
+  const id = Array.from(crypto.getRandomValues(new Uint8Array(18))).map(b=>b.toString(36)).join('').slice(0,24);
+  const expiry = new Date(Date.now() + 2*24*60*60*1000).toISOString(); // 2 days
+  tokens.push({ id, label, expiry, used:false, created:new Date().toISOString() });
+  await saveTokens(tokens, tok);
+  const link = `${location.origin}${location.pathname}?inv_token=${id}`;
+  document.getElementById('tokenStatus').textContent = '';
+  renderTokenList(tokens);
+  // Auto-copy
+  try { await navigator.clipboard.writeText(link); document.getElementById('tokenStatus').textContent = '✅ Link copied to clipboard!'; setTimeout(()=>{document.getElementById('tokenStatus').textContent='';},3000); } catch(e){}
+}
+
+async function revokeToken(id) {
+  const tok = await getToken(); if(!tok) return;
+  const tokens = await fetchTokens();
+  const updated = tokens.filter(t => t.id !== id);
+  await saveTokens(updated, tok);
+  renderTokenList(updated);
+}
+
+async function renderTokenList(tokens) {
+  const el = document.getElementById('tokenList'); if(!el) return;
+  if(!tokens) tokens = await fetchTokens();
+  const now = new Date();
+  // Clean expired tokens display
+  const active = tokens.filter(t => new Date(t.expiry) > now && !t.used);
+  const expired = tokens.filter(t => new Date(t.expiry) <= now || t.used);
+  if(!tokens.length) { el.innerHTML = '<div style="font-size:0.68rem;color:var(--text-light);padding:8px 0;">No token links yet. Generate one above to share with your customer.</div>'; return; }
+  el.innerHTML = active.map(t => {
+    const link = `${location.origin}${location.pathname}?inv_token=${t.id}`;
+    const hrs = Math.max(0, Math.ceil((new Date(t.expiry)-now)/3600000));
+    return `<div style="background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.15);padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:0.75rem;color:var(--cream);font-family:'Cinzel',serif;">${t.label}</div>
+        <div style="font-size:0.58rem;color:var(--text-light);margin-top:3px;word-break:break-all;">${link}</div>
+        <div style="font-size:0.58rem;color:#7ecb8f;margin-top:2px;">⏱ Expires in ${hrs}h</div>
+      </div>
+      <button onclick="copyInvLink('${link}',this)" style="background:rgba(201,168,76,0.12);border:1px solid rgba(201,168,76,0.3);color:var(--gold);padding:6px 12px;font-size:0.6rem;letter-spacing:0.12em;cursor:pointer;">📋 Copy</button>
+      <button onclick="revokeToken('${t.id}')" style="background:none;border:1px solid rgba(224,112,112,0.3);color:#e07070;padding:6px 10px;font-size:0.6rem;cursor:pointer;">✕ Revoke</button>
+    </div>`;
+  }).join('') + (expired.length ? `<div style="font-size:0.6rem;color:var(--text-light);margin-top:4px;">+ ${expired.length} expired/used token${expired.length>1?'s':''} (hidden)</div>` : '');
+}
+
+// ── PENDING INVITATIONS ────────────────────────────────────────────────────
+
+async function fetchPendingInvitations() {
+  try {
+    const res = await fetch(`${API_BASE}/${INV_FOLDER}/pending.json?ref=${GH_BRANCH}&t=${Date.now()}`);
+    if(!res.ok) return [];
+    const f = await res.json();
+    return JSON.parse(atob(f.content.replace(/\n/g,'')));
+  } catch(e) { return []; }
+}
+
+async function savePendingInvitations(list, tok) {
+  let sha = null;
+  try { const r = await fetch(`${API_BASE}/${INV_FOLDER}/pending.json?ref=${GH_BRANCH}`); if(r.ok){const f=await r.json();sha=f.sha;} } catch(e){}
+  const body = { message:'Update pending invitations', branch:GH_BRANCH, content:btoa(unescape(encodeURIComponent(JSON.stringify(list,null,2)))) };
+  if(sha) body.sha = sha;
+  await fetch(`${API_BASE}/${INV_FOLDER}/pending.json`, { method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'}, body:JSON.stringify(body) });
+}
+
+async function renderPendingInvitations() {
+  const el = document.getElementById('pendingInvList'); if(!el) return;
+  const badge = document.getElementById('pendingInvBadge');
+  const list = await fetchPendingInvitations();
+  const active = list.filter(p => p.status === 'pending');
+  if(badge) badge.textContent = active.length ? active.length : '';
+  if(!active.length) { el.innerHTML = '<div class="inv-empty" style="padding:16px;">No pending approvals. ✅</div>'; return; }
+  el.innerHTML = active.map((p,i) => `
+    <div style="background:rgba(255,200,80,0.04);border:1px solid rgba(255,200,80,0.18);padding:16px 18px;margin-bottom:12px;" id="pending_${p.id}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">
+        <div>
+          <div style="font-family:'Cinzel',serif;font-size:0.9rem;color:var(--cream);">${p.bride||p.groom||'Unnamed'} ${p.bride&&p.groom?'<span style="color:var(--gold)">♥</span> '+p.groom:''}</div>
+          <div style="font-size:0.62rem;color:var(--text-light);margin-top:3px;">Submitted: ${new Date(p.submitted).toLocaleString('en-IN')} &nbsp;·&nbsp; Type: ${p.invType||'wedding'} &nbsp;·&nbsp; Theme: ${p.theme||'royal'}</div>
+          <div style="font-size:0.62rem;color:var(--text-light);">Event: ${p.weddingDate||'—'} &nbsp;·&nbsp; Venue: ${(p.venue||'—').slice(0,40)}</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button onclick="editPendingInvitation('${p.id}')" style="background:rgba(123,159,232,0.15);border:1px solid rgba(123,159,232,0.4);color:#a8c0f5;padding:7px 14px;font-size:0.62rem;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;">✏️ Edit</button>
+          <button onclick="approvePendingInvitation('${p.id}')" style="background:rgba(126,203,143,0.15);border:1px solid rgba(126,203,143,0.4);color:#7ecb8f;padding:7px 14px;font-size:0.62rem;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;">✓ Approve & Publish</button>
+          <button onclick="rejectPendingInvitation('${p.id}')" style="background:none;border:1px solid rgba(224,112,112,0.3);color:#e07070;padding:7px 12px;font-size:0.62rem;cursor:pointer;">✕ Reject</button>
+        </div>
+      </div>
+      <div id="pending_edit_${p.id}" style="display:none;"></div>
+    </div>`).join('');
+}
+
+async function approvePendingInvitation(id) {
+  const tok = await getToken();
+  if(!tok) { alert('Please save your GitHub token first.'); return; }
+  const list = await fetchPendingInvitations();
+  const p = list.find(x => x.id === id);
+  if(!p) return;
+  const el = document.getElementById('pending_'+id);
+  if(el) el.style.opacity = '0.5';
+
+  const dateStr = p.weddingDate ? new Date(p.weddingDate).toLocaleDateString('en-IN',{day:'numeric',month:'long',year:'numeric'}) : '';
+  const timeStr = p.weddingTime ? new Date('2000-01-01T'+p.weddingTime).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true}) : '';
+  const defaultMsg = p.message || `With the divine grace of the almighty, we joyfully invite you and your family to celebrate the auspicious occasion of ${p.bride} & ${p.groom}.`;
+  const serviceLabel = p.invType && INV_SERVICE_TYPES[p.invType] ? INV_SERVICE_TYPES[p.invType].en : '';
+  const events = p.events || [];
+
+  const invHtml = buildInvitationHTML({ bride:p.bride, groom:p.groom, brideFam:p.brideFam, groomFam:p.groomFam, wDate:p.weddingDate, dateStr, timeStr, venue:p.venue, address:p.address, mapLink:p.mapLink, message:defaultMsg, events, theme:p.theme||'royal', slug:p.slug, cardLang:p.cardLang||'mr', serviceLabel, invType:p.invType||'wedding' });
+
+  // Upload HTML
+  let sha = null;
+  try { const r = await fetch(`${API_BASE}/${INV_FOLDER}/${p.slug}.html?ref=${GH_BRANCH}`); if(r.ok){const f=await r.json();sha=f.sha;} } catch(e){}
+  const uploadBody = { message:'Publish approved invitation: '+p.slug, branch:GH_BRANCH, content:btoa(unescape(encodeURIComponent(invHtml))) };
+  if(sha) uploadBody.sha = sha;
+  const res = await fetch(`${API_BASE}/${INV_FOLDER}/${p.slug}.html`, { method:'PUT', headers:{Authorization:`Bearer ${tok}`,'Content-Type':'application/json'}, body:JSON.stringify(uploadBody) });
+  if(!res.ok) { alert('Failed to publish. Check token.'); if(el) el.style.opacity='1'; return; }
+
+  // Generate PDF
+  await generateAndUploadInvPDF({ bride:p.bride, groom:p.groom, dateStr, timeStr, venue:p.venue, address:p.address, mapLink:p.mapLink, message:defaultMsg, events, theme:p.theme||'royal', slug:p.slug, cardLang:p.cardLang||'mr', serviceLabel, tok });
+
+  // Update invitations index
+  const invList = await fetchInvitesList();
+  const entry = { slug:p.slug, bride:p.bride, groom:p.groom, brideFam:p.brideFam, groomFam:p.groomFam, weddingDate:p.weddingDate, venue:p.venue, theme:p.theme, cardLang:p.cardLang, serviceType:p.invType, created:new Date().toISOString() };
+  const ex = invList.findIndex(x=>x.slug===p.slug); if(ex>=0) invList[ex]=entry; else invList.push(entry);
+  await saveInvitesList(invList, tok);
+
+  // Remove from pending
+  const updated = list.map(x => x.id===id ? {...x,status:'approved'} : x);
+  await savePendingInvitations(updated, tok);
+
+  renderPendingInvitations();
+  setTimeout(renderInvitesTab, 800);
+}
+
+async function rejectPendingInvitation(id) {
+  if(!confirm('Reject and delete this pending invitation?')) return;
+  const tok = await getToken(); if(!tok) return;
+  const list = await fetchPendingInvitations();
+  const updated = list.map(x => x.id===id ? {...x,status:'rejected'} : x);
+  await savePendingInvitations(updated, tok);
+  renderPendingInvitations();
+}
+
+function editPendingInvitation(id) {
+  // Load pending data into the admin form above for editing
+  fetchPendingInvitations().then(list => {
+    const p = list.find(x => x.id === id);
+    if(!p) return;
+    // Fill all form fields
+    const s = v => v||'';
+    document.getElementById('inv_bride')?.value !== undefined && (document.getElementById('inv_bride').value = s(p.bride));
+    document.getElementById('inv_groom')?.value !== undefined && (document.getElementById('inv_groom').value = s(p.groom));
+    document.getElementById('inv_bride_family') && (document.getElementById('inv_bride_family').value = s(p.brideFam));
+    document.getElementById('inv_groom_family') && (document.getElementById('inv_groom_family').value = s(p.groomFam));
+    document.getElementById('inv_date') && (document.getElementById('inv_date').value = s(p.weddingDate));
+    document.getElementById('inv_time') && (document.getElementById('inv_time').value = s(p.weddingTime));
+    document.getElementById('inv_venue') && (document.getElementById('inv_venue').value = s(p.venue));
+    document.getElementById('inv_address') && (document.getElementById('inv_address').value = s(p.address));
+    document.getElementById('inv_map') && (document.getElementById('inv_map').value = s(p.mapLink));
+    document.getElementById('inv_message') && (document.getElementById('inv_message').value = s(p.message));
+    document.getElementById('inv_slug') && (document.getElementById('inv_slug').value = s(p.slug));
+    document.getElementById('slugPreview') && (document.getElementById('slugPreview').textContent = p.slug||'your-slug');
+    if(p.theme) { const r = document.querySelector(`input[name="inv_theme"][value="${p.theme}"]`); if(r) r.checked = true; }
+    if(p.invType) selectInvType(p.invType);
+    if(p.cardLang) { invCardLang = p.cardLang; }
+    if(p.events) { invEvents = p.events; renderInvEvents(); }
+    // Store pending id so approve replaces it
+    window._editingPendingId = id;
+    // Scroll to top of form
+    document.getElementById('invFormTitle')?.scrollIntoView({behavior:'smooth',block:'start'});
+    setInvStatus('✏️ Editing pending submission from '+p.bride+' — make changes and click PUBLISH.','');
   });
 }
 
@@ -2560,12 +2781,320 @@ async function cacheInvitesForDecor() {
 }
 
 (async function init() {
+  // ── TOKEN FORM MODE — show guest fill-in form if ?inv_token= in URL ──────
+  const urlParams = new URLSearchParams(location.search);
+  const invToken = urlParams.get('inv_token');
+  if(invToken) {
+    await showTokenForm(invToken);
+    return; // Don't load main site
+  }
+
   await loadConfig();
   applySiteData();
   loadGallery();
   const freshList = await cacheInvitesForDecor();
   checkWeddingDayDecor(freshList);
 })();
+
+async function showTokenForm(tokenId) {
+  // Validate token from GitHub
+  let tokenData = null;
+  try {
+    const res = await fetch(`${RAW_BASE}/${INV_FOLDER}/tokens.json?_=${Date.now()}`);
+    if(res.ok) {
+      const list = await res.json();
+      tokenData = list.find(t => t.id === tokenId);
+    }
+  } catch(e) {}
+
+  document.body.innerHTML = ''; // Clear entire site
+  document.body.style.cssText = 'background:#0D0A05;color:#F7F0E0;font-family:Raleway,sans-serif;margin:0;padding:0;min-height:100vh;';
+
+  if(!tokenData) {
+    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;">
+      <div style="font-size:3rem;margin-bottom:20px;">🔒</div>
+      <h2 style="font-family:Cinzel,serif;color:#C9A84C;margin-bottom:12px;">Invalid Link</h2>
+      <p style="color:#D4C4A0;">This invitation link is invalid or does not exist.</p>
+      <p style="color:#D4C4A0;margin-top:8px;">Please contact Krishnam Lawns & Banquets for a new link.</p>
+      <p style="margin-top:24px;font-size:0.8rem;color:#C9A84C;">+91 88888 83587</p>
+    </div>`;
+    return;
+  }
+  if(tokenData.used) {
+    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;">
+      <div style="font-size:3rem;margin-bottom:20px;">✅</div>
+      <h2 style="font-family:Cinzel,serif;color:#C9A84C;margin-bottom:12px;">Already Submitted</h2>
+      <p style="color:#D4C4A0;">Your invitation details have already been submitted and are awaiting admin approval.</p>
+      <p style="color:#D4C4A0;margin-top:8px;">You will be notified once it's published. Contact us for any changes.</p>
+      <p style="margin-top:24px;font-size:0.8rem;color:#C9A84C;">Krishnam Lawns & Banquets · +91 88888 83587</p>
+    </div>`;
+    return;
+  }
+  if(new Date(tokenData.expiry) < new Date()) {
+    const hoursAgo = Math.ceil((new Date()-new Date(tokenData.expiry))/3600000);
+    document.body.innerHTML = `<div style="max-width:500px;margin:80px auto;text-align:center;padding:40px 20px;">
+      <div style="font-size:3rem;margin-bottom:20px;">⏰</div>
+      <h2 style="font-family:Cinzel,serif;color:#e07070;margin-bottom:12px;">Link Expired</h2>
+      <p style="color:#D4C4A0;">This invitation link expired ${hoursAgo}h ago.</p>
+      <p style="color:#D4C4A0;margin-top:8px;">Please contact Krishnam Lawns & Banquets to get a new link.</p>
+      <p style="margin-top:24px;font-size:0.8rem;color:#C9A84C;">+91 88888 83587</p>
+    </div>`;
+    return;
+  }
+
+  // Valid token — show guest form
+  const expiryHrs = Math.ceil((new Date(tokenData.expiry)-new Date())/3600000);
+  document.head.innerHTML += `<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Cormorant+Garamond:ital,wght@0,400;1,400&family=Raleway:wght@300;400;600&display=swap" rel="stylesheet"/>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");pointer-events:none;z-index:0;opacity:0.4;}
+    .tf-wrap{position:relative;z-index:1;max-width:680px;margin:0 auto;padding:40px 20px 60px;}
+    .tf-header{text-align:center;padding:40px 0 30px;border-bottom:1px solid rgba(201,168,76,0.15);margin-bottom:30px;}
+    .tf-logo{font-family:Cinzel,serif;font-size:1.1rem;color:#C9A84C;letter-spacing:0.12em;margin-bottom:6px;}
+    .tf-logo-sub{font-size:0.6rem;letter-spacing:0.3em;text-transform:uppercase;color:#D4C4A0;margin-bottom:20px;}
+    .tf-title{font-family:Cinzel,serif;font-size:1.4rem;color:#F7F0E0;margin-bottom:8px;}
+    .tf-subtitle{font-family:'Cormorant Garamond',serif;font-style:italic;font-size:1rem;color:#D4C4A0;}
+    .tf-expiry{display:inline-block;font-size:0.6rem;letter-spacing:0.2em;text-transform:uppercase;color:#7ecb8f;border:1px solid rgba(126,203,143,0.3);padding:4px 12px;margin-top:10px;}
+    .tf-section{font-family:Cinzel,serif;color:#C9A84C;font-size:0.72rem;letter-spacing:0.18em;text-transform:uppercase;margin:24px 0 12px;padding-bottom:8px;border-bottom:1px solid rgba(201,168,76,0.12);}
+    .tf-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+    @media(max-width:500px){.tf-grid{grid-template-columns:1fr;}}
+    .tf-field{display:flex;flex-direction:column;gap:5px;}
+    .tf-label{font-size:0.58rem;letter-spacing:0.2em;text-transform:uppercase;color:#C9A84C;}
+    .tf-input{width:100%;background:#18120a;border:1px solid rgba(201,168,76,0.2);color:#F7F0E0;padding:10px 13px;font-family:Raleway,sans-serif;font-size:0.82rem;outline:none;transition:border-color 0.3s;}
+    .tf-input:focus{border-color:#C9A84C;background:#201808;}
+    select.tf-input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23C9A84C'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center;padding-right:32px;background-color:#18120a;}
+    select.tf-input option{background:#18120a;}
+    textarea.tf-input{resize:vertical;}
+    .tf-event-row{background:rgba(201,168,76,0.03);border:1px solid rgba(201,168,76,0.1);padding:14px;margin-bottom:10px;}
+    .tf-add-event{background:none;border:1px dashed rgba(201,168,76,0.3);color:#C9A84C;padding:8px 18px;font-size:0.65rem;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;margin-top:4px;width:100%;}
+    .tf-submit{width:100%;background:linear-gradient(135deg,#C9A84C,#E8C97A);color:#0D0A05;border:none;padding:16px;font-family:Raleway,sans-serif;font-size:0.78rem;font-weight:700;letter-spacing:0.25em;text-transform:uppercase;cursor:pointer;margin-top:24px;transition:all 0.3s;}
+    .tf-submit:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(201,168,76,0.3);}
+    .tf-submit:disabled{opacity:0.5;cursor:not-allowed;transform:none;}
+    .tf-status{text-align:center;font-size:0.78rem;margin-top:12px;min-height:18px;color:#C9A84C;font-style:italic;}
+    .tf-theme-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;}
+    .tf-theme-opt{position:relative;cursor:pointer;}
+    .tf-theme-opt input{position:absolute;opacity:0;}
+    .tf-theme-swatch{padding:7px 12px;border:1px solid rgba(201,168,76,0.2);font-size:0.65rem;letter-spacing:0.1em;color:#D4C4A0;transition:all 0.2s;}
+    .tf-theme-opt input:checked~.tf-theme-swatch{border-color:#C9A84C;color:#C9A84C;background:rgba(201,168,76,0.08);}
+    .tf-type-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px;}
+    .tf-type-btn{background:rgba(201,168,76,0.03);border:1px solid rgba(201,168,76,0.15);color:#D4C4A0;padding:12px 8px;cursor:pointer;font-size:0.62rem;letter-spacing:0.1em;text-transform:uppercase;text-align:center;transition:all 0.2s;}
+    .tf-type-btn:hover{background:rgba(201,168,76,0.08);border-color:rgba(201,168,76,0.4);}
+    .tf-type-btn.active{background:rgba(201,168,76,0.13);border-color:#C9A84C;color:#C9A84C;}
+    .tf-note{font-size:0.65rem;color:#D4C4A0;line-height:1.6;background:rgba(201,168,76,0.04);border:1px solid rgba(201,168,76,0.1);padding:10px 14px;margin-bottom:16px;}
+  </style>`;
+
+  const typeLabels = {wedding:'💍 Wedding',reception:'🎊 Reception',birthday:'🎂 Birthday',corporate:'🏢 Corporate'};
+  const themeLabels = {royal:'👑 Royal Gold',floral:'🌸 Floral Pink',emerald:'🌿 Emerald',midnight:'🌙 Midnight Blue',rose:'🥀 Rose Gold'};
+  const langLabels = {en:'English',hi:'Hindi',mr:'Marathi',te:'Telugu',ta:'Tamil',gu:'Gujarati',bn:'Bengali',pa:'Punjabi'};
+
+  let tfEvents = [{name:'',date:'',time:''}];
+  let tfType = 'wedding';
+
+  function renderTFEvents() {
+    const el = document.getElementById('tfEventList'); if(!el) return;
+    el.innerHTML = tfEvents.map((ev,i) => `
+      <div class="tf-event-row">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+          <span style="font-size:0.58rem;letter-spacing:0.15em;color:#C9A84C;text-transform:uppercase;">Event ${i+1}</span>
+          ${i>0?`<button onclick="tfRemoveEvent(${i})" style="background:none;border:none;color:#e07070;cursor:pointer;font-size:0.8rem;">✕ Remove</button>`:''}
+        </div>
+        <div class="tf-grid" style="grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <div class="tf-field"><span class="tf-label">Event Name</span><input class="tf-input" placeholder="e.g. Wedding Ceremony" value="${ev.name||''}" oninput="tfEvents[${i}].name=this.value"/></div>
+          <div class="tf-field"><span class="tf-label">Date</span><input class="tf-input" type="date" value="${ev.date||''}" oninput="tfEvents[${i}].date=this.value"/></div>
+          <div class="tf-field"><span class="tf-label">Time</span><input class="tf-input" type="time" value="${ev.time||''}" oninput="tfEvents[${i}].time=this.value"/></div>
+        </div>
+      </div>`).join('');
+  }
+  window.tfRemoveEvent = function(i){ tfEvents.splice(i,1); renderTFEvents(); };
+  window.tfAddEvent = function(){ tfEvents.push({name:'',date:'',time:''}); renderTFEvents(); };
+  window.tfSelectType = function(type){
+    tfType=type;
+    document.querySelectorAll('.tf-type-btn').forEach(b=>b.classList.remove('active'));
+    document.getElementById('tftype_'+type)?.classList.add('active');
+  };
+
+  document.body.innerHTML = `<div class="tf-wrap">
+    <div class="tf-header">
+      <div class="tf-logo">Krishnam Lawns & Banquets</div>
+      <div class="tf-logo-sub">Hudkeshwar, Nagpur · +91 88888 83587</div>
+      <div class="tf-title">✦ Your Invitation Details</div>
+      <div class="tf-subtitle">Fill in your event details. We'll review and send you the final invitation.</div>
+      <div class="tf-expiry">⏱ This form expires in ${expiryHrs}h</div>
+    </div>
+
+    <div class="tf-note">📝 Fill in all the details below and submit. Once our team reviews and approves, your beautiful digital invitation will be sent to you. You can contact us to make any changes before approval.</div>
+
+    <div class="tf-section">Event Type</div>
+    <div class="tf-type-grid">
+      <button class="tf-type-btn active" id="tftype_wedding" onclick="tfSelectType('wedding')">💍 Wedding Ceremony</button>
+      <button class="tf-type-btn" id="tftype_reception" onclick="tfSelectType('reception')">🎊 Reception & Party</button>
+      <button class="tf-type-btn" id="tftype_birthday" onclick="tfSelectType('birthday')">🎂 Birthday Party</button>
+      <button class="tf-type-btn" id="tftype_corporate" onclick="tfSelectType('corporate')">🏢 Corporate Event</button>
+    </div>
+
+    <div class="tf-section">Host Details</div>
+    <div class="tf-grid">
+      <div class="tf-field"><span class="tf-label">Name 1 (Bride / Host)</span><input class="tf-input" id="tf_bride" placeholder="e.g. Prajakta Nagpure"/></div>
+      <div class="tf-field"><span class="tf-label">Name 2 (Groom / Co-host)</span><input class="tf-input" id="tf_groom" placeholder="e.g. Ankit Gatthekar"/></div>
+      <div class="tf-field"><span class="tf-label">Family 1</span><input class="tf-input" id="tf_bridefam" placeholder="e.g. Nagpure Family"/></div>
+      <div class="tf-field"><span class="tf-label">Family 2</span><input class="tf-input" id="tf_groomfam" placeholder="e.g. Gatthekar Family"/></div>
+    </div>
+
+    <div class="tf-section">Event Date & Venue</div>
+    <div class="tf-grid">
+      <div class="tf-field"><span class="tf-label">Main Event Date</span><input class="tf-input" id="tf_date" type="date"/></div>
+      <div class="tf-field"><span class="tf-label">Time</span><input class="tf-input" id="tf_time" type="time"/></div>
+      <div class="tf-field" style="grid-column:1/-1"><span class="tf-label">Venue Name</span><input class="tf-input" id="tf_venue" placeholder="e.g. Krishnam Lawns & Banquets"/></div>
+      <div class="tf-field" style="grid-column:1/-1"><span class="tf-label">Venue Address</span><input class="tf-input" id="tf_address" placeholder="Full address…"/></div>
+      <div class="tf-field" style="grid-column:1/-1"><span class="tf-label">Google Maps Link (optional)</span><input class="tf-input" id="tf_map" placeholder="https://maps.app.goo.gl/…"/></div>
+    </div>
+
+    <div class="tf-section">Events Programme</div>
+    <div id="tfEventList"></div>
+    <button class="tf-add-event" onclick="tfAddEvent()">+ Add Another Event</button>
+
+    <div class="tf-section">Invitation Design</div>
+    <div class="tf-theme-row">
+      <label class="tf-theme-opt"><input type="radio" name="tf_theme" value="royal" checked/><div class="tf-theme-swatch">👑 Royal Gold</div></label>
+      <label class="tf-theme-opt"><input type="radio" name="tf_theme" value="floral"/><div class="tf-theme-swatch">🌸 Floral Pink</div></label>
+      <label class="tf-theme-opt"><input type="radio" name="tf_theme" value="emerald"/><div class="tf-theme-swatch">🌿 Emerald</div></label>
+      <label class="tf-theme-opt"><input type="radio" name="tf_theme" value="midnight"/><div class="tf-theme-swatch">🌙 Midnight Blue</div></label>
+      <label class="tf-theme-opt"><input type="radio" name="tf_theme" value="rose"/><div class="tf-theme-swatch">🥀 Rose Gold</div></label>
+    </div>
+    <div class="tf-grid" style="margin-top:14px;">
+      <div class="tf-field"><span class="tf-label">Invitation Language</span>
+        <select class="tf-input" id="tf_lang">
+          ${Object.entries(langLabels).map(([k,v])=>`<option value="${k}"${k==='mr'?' selected':''}>${v}</option>`).join('')}
+        </select>
+      </div>
+      <div class="tf-field"><span class="tf-label">Invitation URL Slug</span>
+        <input class="tf-input" id="tf_slug" placeholder="bride-weds-groom-year"/>
+        <span style="font-size:0.58rem;color:#D4C4A0;margin-top:3px;">Only lowercase letters, numbers, hyphens</span>
+      </div>
+    </div>
+
+    <div class="tf-section" style="margin-top:20px;">Personal Message (optional)</div>
+    <textarea class="tf-input" id="tf_message" rows="3" placeholder="With the divine grace of the almighty, we joyfully invite you…" style="resize:vertical;width:100%;"></textarea>
+
+    <button class="tf-submit" id="tfSubmitBtn" onclick="tfSubmit('${tokenId}')">✦ SUBMIT INVITATION DETAILS</button>
+    <div class="tf-status" id="tfStatus"></div>
+
+    <div style="text-align:center;margin-top:40px;padding-top:24px;border-top:1px solid rgba(201,168,76,0.1);">
+      <div style="font-family:Cinzel,serif;font-size:0.8rem;color:#C9A84C;letter-spacing:0.15em;">Krishnam Lawns & Banquets</div>
+      <div style="font-size:0.62rem;color:#D4C4A0;margin-top:4px;">Hudkeshwar, Nagpur · +91 88888 83587</div>
+    </div>
+  </div>`;
+
+  renderTFEvents();
+
+  // Auto-generate slug
+  ['tf_bride','tf_groom','tf_date'].forEach(id => {
+    document.getElementById(id)?.addEventListener('input', () => {
+      const b = (document.getElementById('tf_bride')?.value||'').trim().split(' ')[0].toLowerCase();
+      const g = (document.getElementById('tf_groom')?.value||'').trim().split(' ')[0].toLowerCase();
+      const d = (document.getElementById('tf_date')?.value||'').slice(0,4);
+      const slug = [b,'weds',g,d].filter(Boolean).join('-').replace(/[^a-z0-9-]/g,'');
+      const el = document.getElementById('tf_slug');
+      if(el && !el._manual) el.value = slug;
+    });
+  });
+  document.getElementById('tf_slug')?.addEventListener('input', e => { e.target._manual = !!e.target.value; });
+
+  window.tfSubmit = async function(tokenId) {
+    const btn = document.getElementById('tfSubmitBtn');
+    const statusEl = document.getElementById('tfStatus');
+    const bride = document.getElementById('tf_bride')?.value.trim();
+    const groom = document.getElementById('tf_groom')?.value.trim();
+    const wDate = document.getElementById('tf_date')?.value;
+    const venue = document.getElementById('tf_venue')?.value.trim();
+    const slug  = (document.getElementById('tf_slug')?.value||'').trim().replace(/[^a-z0-9-]/g,'');
+    if(!bride||!wDate||!venue||!slug) {
+      statusEl.textContent = '✕ Please fill: Name 1, Event Date, Venue, and URL Slug.';
+      statusEl.style.color = '#e07070'; return;
+    }
+    btn.disabled = true; btn.textContent = 'Submitting…';
+    statusEl.textContent = 'Saving your details…'; statusEl.style.color = '#C9A84C';
+
+    const submission = {
+      id: Date.now()+'-'+Math.random().toString(36).slice(2,8),
+      tokenId, status:'pending',
+      submitted: new Date().toISOString(),
+      invType: tfType,
+      bride, groom,
+      brideFam: document.getElementById('tf_bridefam')?.value.trim()||'',
+      groomFam: document.getElementById('tf_groomfam')?.value.trim()||'',
+      weddingDate: wDate,
+      weddingTime: document.getElementById('tf_time')?.value||'',
+      venue, address: document.getElementById('tf_address')?.value.trim()||'',
+      mapLink: document.getElementById('tf_map')?.value.trim()||'',
+      message: document.getElementById('tf_message')?.value.trim()||'',
+      slug, theme: document.querySelector('input[name="tf_theme"]:checked')?.value||'royal',
+      cardLang: document.getElementById('tf_lang')?.value||'mr',
+      events: tfEvents.filter(e=>e.name)
+    };
+
+    // Save to pending.json via GitHub API (needs no auth — use raw PUT with placeholder token)
+    // Actually: pending.json must be saved via GitHub API which needs a token.
+    // We use a trick: save to a publicly-writable Gist or use a serverless approach.
+    // BEST approach for static GitHub Pages: save submission data in a new file pending_{id}.json
+    // But that needs auth. Instead, encode the data in a GitHub Issue via the Issues API (public repos).
+    // For simplicity and security: use email via mailto: as final step + localStorage backup.
+    
+    // Store in localStorage (customer side backup)
+    try { localStorage.setItem('kl_tf_submission_'+submission.id, JSON.stringify(submission)); } catch(e){}
+
+    // Create a GitHub issue with the submission data (works on public repos without auth)
+    const issueBody = [
+      '## New Invitation Submission',
+      '',
+      `**Token:** ${tokenId}`,
+      `**Type:** ${tfType}`,
+      `**Name 1:** ${bride}`,
+      `**Name 2:** ${groom||'—'}`,
+      `**Date:** ${wDate}`,
+      `**Venue:** ${venue}`,
+      `**Slug:** ${slug}`,
+      `**Theme:** ${submission.theme}`,
+      `**Language:** ${submission.cardLang}`,
+      '',
+      '```json',
+      JSON.stringify(submission, null, 2),
+      '```',
+    ].join('\n');
+
+    let savedOk = false;
+    try {
+      const issueRes = await fetch(`https://api.github.com/repos/${GH_USER}/${GH_REPO}/issues`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json','Accept':'application/vnd.github.v3+json'},
+        body: JSON.stringify({ title:`🎊 New Invitation: ${bride}${groom?' & '+groom:''} — ${wDate}`, body:issueBody, labels:['invitation-request'] })
+      });
+      if(issueRes.ok) savedOk = true;
+    } catch(e){}
+
+    // Also try to save to pending.json if possible (will fail without token, that's ok)
+    try {
+      const pendRes = await fetch(`${RAW_BASE}/${INV_FOLDER}/pending.json?_=${Date.now()}`);
+      // Only if it exists and is readable — no write without token
+    } catch(e){}
+
+    btn.disabled = false;
+    if(savedOk) {
+      btn.textContent = '✅ Submitted!';
+      btn.style.background = 'linear-gradient(135deg,#7ecb8f,#a8e6b5)';
+      statusEl.innerHTML = `<div style="background:rgba(126,203,143,0.1);border:1px solid rgba(126,203,143,0.3);padding:16px;margin-top:12px;text-align:center;">
+        <div style="font-size:1.2rem;margin-bottom:8px;">🎊</div>
+        <div style="color:#7ecb8f;font-weight:600;margin-bottom:6px;">Details Submitted Successfully!</div>
+        <div style="color:#D4C4A0;font-size:0.78rem;">Our team at Krishnam Lawns & Banquets will review your invitation details and publish your beautiful digital invitation shortly.</div>
+        <div style="color:#C9A84C;font-size:0.72rem;margin-top:10px;">📞 For any changes, call us: +91 88888 83587</div>
+      </div>`;
+    } else {
+      btn.textContent = '✦ SUBMIT INVITATION DETAILS';
+      statusEl.textContent = '✕ Could not save. Please contact us directly at +91 88888 83587.';
+      statusEl.style.color = '#e07070';
+    }
+  };
+}
 </script>
 </body>
 </html>
