@@ -1614,9 +1614,28 @@ async function deleteInvitation(slug) {
   const list = await fetchInvitesList();
   const updated = list.filter(i => i.slug !== slug);
   await saveInvitesList(updated, tok);
-  // Clear homepage decoration cache so deleted invitation is not shown
+  // Update localStorage cache immediately so homepage decoration reflects deletion
   localStorage.setItem('kl_invites_cache', JSON.stringify(updated));
+  // If the deleted invitation was showing on the homepage today, remove all decoration immediately
+  removeWeddingDayDecorIfGone(updated);
   renderInvitesTab();
+}
+
+function removeWeddingDayDecorIfGone(updatedList) {
+  try {
+    const today = new Date().toISOString().slice(0,10);
+    const stillActive = updatedList.find(inv => inv.weddingDate === today);
+    if (!stillActive) {
+      // Remove banner
+      const banner = document.getElementById('wedding-day-banner');
+      if (banner) banner.remove();
+      // Reset navbar top
+      const nav = document.getElementById('navbar');
+      if (nav) nav.style.top = '';
+      // Remove all floating petals
+      document.querySelectorAll('body > div[style*="fall"]').forEach(el => el.remove());
+    }
+  } catch(e) {}
 }
 
 async function createInvitation() {
@@ -2326,14 +2345,29 @@ function applyWeddingDayTheme(inv) {
 // Fetch fresh invites list — always bypass cache so deleted invitations never show
 async function cacheInvitesForDecor() {
   try {
-    const res = await fetch(`${RAW_BASE}/${INV_FOLDER}/index.json?t=${Date.now()}`, {cache:'no-store'});
-    if(res.ok) {
-      const list = await res.json();
+    // Use GitHub Contents API (not raw) — it bypasses CDN caching and always returns live data
+    const res = await fetch(`${API_BASE}/${INV_FOLDER}/index.json?ref=${GH_BRANCH}&_=${Date.now()}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      // GitHub Contents API returns base64-encoded content
+      let list;
+      if (data.content) {
+        list = JSON.parse(atob(data.content.replace(/\n/g, '')));
+      } else {
+        list = data; // fallback if already parsed
+      }
       localStorage.setItem('kl_invites_cache', JSON.stringify(list));
       return list;
     }
   } catch(e) {}
-  // If fetch fails, clear stale cache so nothing shows incorrectly
+  // If fetch fails, use localStorage cache but warn it may be stale
+  try {
+    const cached = localStorage.getItem('kl_invites_cache');
+    if (cached) return JSON.parse(cached);
+  } catch(e) {}
   localStorage.removeItem('kl_invites_cache');
   return [];
 }
