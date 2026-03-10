@@ -1231,9 +1231,11 @@ async function renderInvitesTab() {
     .inv-form-grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; }
     .inv-field { display:flex; flex-direction:column; gap:6px; }
     .inv-label { font-size:0.6rem; letter-spacing:0.22em; text-transform:uppercase; color:var(--gold); }
-    .inv-input { width:100%; background:rgba(201,168,76,0.03); border:1px solid rgba(201,168,76,0.15); color:var(--cream); padding:10px 13px; font-family:'Raleway',sans-serif; font-size:0.82rem; outline:none; transition:border-color 0.3s; }
-    .inv-input:focus { border-color:var(--gold); }
-    .inv-input select { appearance:none; }
+    .inv-input { width:100%; background:#18120a; border:1px solid rgba(201,168,76,0.2); color:#f0e8d0; padding:10px 13px; font-family:'Raleway',sans-serif; font-size:0.82rem; outline:none; transition:border-color 0.3s; }
+    .inv-input:focus { border-color:var(--gold); background:#201808; }
+    select.inv-input { appearance:none; -webkit-appearance:none; cursor:pointer; background-color:#18120a; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23C9A84C'/%3E%3C/svg%3E"); background-repeat:no-repeat; background-position:right 12px center; padding-right:32px; }
+    select.inv-input option { background:#18120a; color:#f0e8d0; }
+    textarea.inv-input { resize:vertical; }
     .inv-section-title { font-family:'Cinzel',serif; color:var(--gold); font-size:0.78rem; letter-spacing:0.15em; text-transform:uppercase; margin:22px 0 14px; padding-bottom:8px; border-bottom:1px solid rgba(201,168,76,0.15); }
     .inv-create-btn { background:linear-gradient(135deg,var(--gold),var(--gold-light)); color:var(--dark); border:none; padding:13px 32px; font-family:'Raleway',sans-serif; font-size:0.72rem; font-weight:700; letter-spacing:0.25em; text-transform:uppercase; cursor:pointer; margin-top:16px; transition:all 0.3s; }
     .inv-create-btn:hover { transform:translateY(-2px); box-shadow:0 8px 24px rgba(201,168,76,0.3); }
@@ -1257,45 +1259,61 @@ async function renderInvitesTab() {
     .inv-theme-opt input { position:absolute; opacity:0; }
     .inv-theme-swatch { display:flex; align-items:center; gap:8px; padding:8px 14px; border:1px solid rgba(201,168,76,0.2); font-size:0.68rem; letter-spacing:0.12em; color:var(--text-light); transition:all 0.2s; }
     .inv-theme-opt input:checked ~ .inv-theme-swatch { border-color:var(--gold); color:var(--gold); background:rgba(201,168,76,0.08); }
+    .inv-type-btn { background:rgba(201,168,76,0.03); border:1px solid rgba(201,168,76,0.15); color:var(--text-light); padding:14px 8px 12px; cursor:pointer; font-family:'Raleway',sans-serif; font-size:0.65rem; letter-spacing:0.1em; text-transform:uppercase; transition:all 0.2s; text-align:center; line-height:1.4; }
+    .inv-type-btn:hover { background:rgba(201,168,76,0.07); border-color:rgba(201,168,76,0.35); color:var(--cream); }
+    .inv-type-btn.inv-type-active { background:rgba(201,168,76,0.13); border-color:var(--gold); color:var(--gold); }
+    .inv-type-icon { font-size:1.5rem; display:block; margin-bottom:6px; }
   </style>
 
-  <div class="inv-section-title">💌 Create New Wedding Invitation</div>
+  <!-- ══ STEP 1: INVITATION TYPE ══════════════════════════════════════════ -->
+  <div class="inv-section-title">✦ Step 1 — Select Invitation Type</div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:22px;" id="invTypeGrid">
+    <button type="button" id="invtype_wedding"   onclick="selectInvType('wedding')"   class="inv-type-btn inv-type-active"><div class="inv-type-icon">💍</div>Wedding Ceremony</button>
+    <button type="button" id="invtype_reception" onclick="selectInvType('reception')" class="inv-type-btn"><div class="inv-type-icon">🎊</div>Reception &amp; Party</button>
+    <button type="button" id="invtype_catering"  onclick="selectInvType('catering')"  class="inv-type-btn"><div class="inv-type-icon">🍽️</div>Catering &amp; Cuisine</button>
+    <button type="button" id="invtype_corporate" onclick="selectInvType('corporate')" class="inv-type-btn"><div class="inv-type-icon">🏢</div>Corporate Event</button>
+    <button type="button" id="invtype_social"    onclick="selectInvType('social')"    class="inv-type-btn"><div class="inv-type-icon">🎉</div>Social Celebration</button>
+    <button type="button" id="invtype_lawn"      onclick="selectInvType('lawn')"      class="inv-type-btn"><div class="inv-type-icon">🌿</div>Open Lawn Event</button>
+  </div>
+
+  <!-- ══ STEP 2: DETAILS ══════════════════════════════════════════════════ -->
+  <div class="inv-section-title" id="invFormTitle">✦ Step 2 — Wedding Invitation Details</div>
 
   <div class="inv-form-grid">
-    <div class="inv-field"><span class="inv-label">Bride's Full Name</span><input class="inv-input" id="inv_bride" placeholder="e.g. Prajakta Nagpure"/></div>
-    <div class="inv-field"><span class="inv-label">Groom's Full Name</span><input class="inv-input" id="inv_groom" placeholder="e.g. Ankit Gatthekar"/></div>
+    <div class="inv-field"><span class="inv-label" id="invLabel1">Bride's Full Name</span><input class="inv-input" id="inv_bride" placeholder="e.g. Prajakta Nagpure"/></div>
+    <div class="inv-field"><span class="inv-label" id="invLabel2">Groom's Full Name</span><input class="inv-input" id="inv_groom" placeholder="e.g. Ankit Gatthekar"/></div>
   </div>
   <div class="inv-form-grid" style="margin-top:12px;">
-    <div class="inv-field"><span class="inv-label">Bride's Family Name</span><input class="inv-input" id="inv_bride_family" placeholder="e.g. Nagpure Family"/></div>
-    <div class="inv-field"><span class="inv-label">Groom's Family Name</span><input class="inv-input" id="inv_groom_family" placeholder="e.g. Gatthekar Family"/></div>
+    <div class="inv-field"><span class="inv-label" id="invLabel3">Bride's Family Name</span><input class="inv-input" id="inv_bride_family" placeholder="e.g. Nagpure Family"/></div>
+    <div class="inv-field"><span class="inv-label" id="invLabel4">Groom's Family Name</span><input class="inv-input" id="inv_groom_family" placeholder="e.g. Gatthekar Family"/></div>
   </div>
   <div class="inv-form-grid" style="margin-top:12px;">
-    <div class="inv-field"><span class="inv-label">Wedding Date</span><input class="inv-input" id="inv_date" type="date"/></div>
-    <div class="inv-field"><span class="inv-label">Ceremony Time</span><input class="inv-input" id="inv_time" type="time" value="18:00"/></div>
+    <div class="inv-field"><span class="inv-label" id="invLabel5">Wedding Date</span><input class="inv-input" id="inv_date" type="date"/></div>
+    <div class="inv-field"><span class="inv-label">Event Time</span><input class="inv-input" id="inv_time" type="time" value="18:00"/></div>
   </div>
   <div class="inv-field" style="margin-top:12px;"><span class="inv-label">Venue Name</span><input class="inv-input" id="inv_venue" value="Krishnam Lawns &amp; Banquets"/></div>
   <div class="inv-field" style="margin-top:12px;"><span class="inv-label">Venue Address</span><input class="inv-input" id="inv_address" value="Outer Ring Rd, Hudkeshwar, Nagpur, Maharashtra 440037"/></div>
   <div class="inv-field" style="margin-top:12px;"><span class="inv-label">Google Maps Link</span><input class="inv-input" id="inv_map" value="https://maps.app.goo.gl/iyjcCS83y51dXh7p7"/></div>
 
-  <div class="inv-section-title" style="margin-top:20px;">🌐 Invitation Language & Type</div>
-  <div class="inv-form-grid" style="margin-bottom:14px;">
+  <!-- Hidden service type (set by button clicks above) -->
+  <input type="hidden" id="inv_service_type" value="wedding"/>
+
+  <!-- Language selector -->
+  <div class="inv-form-grid" style="margin-top:18px;">
     <div class="inv-field">
-      <span class="inv-label">Card Language (for event names & text)</span>
+      <span class="inv-label">🌐 Card Language</span>
       <select class="inv-input" id="inv_lang_select" onchange="setInvCardLang(this.value)">
         ${Object.entries(INV_LANG_DATA).map(([k,v])=>'<option value="'+k+'"'+(k===invCardLang?' selected':'')+'>'+v.label+'</option>').join('')}
       </select>
     </div>
-    <div class="inv-field">
-      <span class="inv-label">Event/Service Type</span>
-      <select class="inv-input" id="inv_service_type">
-        <option value="">— General / Wedding —</option>
-        ${Object.entries(INV_SERVICE_TYPES).map(([k,v])=>'<option value="'+k+'">'+v.en+'</option>').join('')}
-      </select>
+    <div style="display:flex;flex-direction:column;justify-content:flex-end;">
+      <div style="font-size:0.6rem;color:var(--text-light);padding-bottom:6px;line-height:1.6;">Event names will auto-fill in the chosen language when you select event types below.</div>
     </div>
   </div>
 
-  <div class="inv-section-title" style="margin-top:4px;">🎉 Wedding Events</div>
-  <div style="font-size:0.62rem;color:var(--text-light);margin-bottom:10px;letter-spacing:0.05em;">Select event type from dropdown — name auto-fills in your chosen language.</div>
+  <!-- ══ STEP 3: EVENTS ═══════════════════════════════════════════════════ -->
+  <div class="inv-section-title" style="margin-top:20px;" id="invEventsTitle">✦ Step 3 — Wedding Events</div>
+  <div style="font-size:0.62rem;color:var(--text-light);margin-bottom:10px;letter-spacing:0.05em;">Select event type — name auto-fills in chosen language. You can edit it manually.</div>
   <div id="inv_events_list"></div>
   <button onclick="addInvEvent()" style="background:none;border:1px dashed rgba(201,168,76,0.3);color:var(--gold);padding:8px 18px;font-size:0.68rem;letter-spacing:0.15em;text-transform:uppercase;cursor:pointer;margin-top:8px;">+ Add Event</button>
 
@@ -1398,6 +1416,55 @@ const INV_SERVICE_TYPES = {
 };
 
 let invCardLang = 'mr'; // default card language
+
+// ── INVITATION TYPE SELECTOR ──────────────────────────────────────────────
+const INV_TYPE_META = {
+  wedding:   { title:'✦ Step 2 — Wedding Invitation Details',    evTitle:'✦ Step 3 — Wedding Events',      l1:"Bride's Full Name",   l2:"Groom's Full Name",   l3:"Bride's Family",    l4:"Groom's Family",    l5:'Wedding Date',    p1:'e.g. Prajakta Nagpure', p2:'e.g. Ankit Gatthekar',  serviceLabel:'Wedding Ceremony' },
+  reception: { title:'✦ Step 2 — Reception / Party Details',     evTitle:'✦ Step 3 — Programme',           l1:'Host Name',           l2:'Co-host Name',        l3:"Host's Family",     l4:"Co-host's Family",  l5:'Event Date',      p1:'e.g. Sunita Deshpande', p2:'e.g. Ravi Deshpande',   serviceLabel:'Reception & Party' },
+  catering:  { title:'✦ Step 2 — Catering Event Details',        evTitle:'✦ Step 3 — Menu / Programme',    l1:'Primary Host',        l2:'Organisation / Co-host', l3:'Host Family',    l4:'Co-host Family',    l5:'Event Date',      p1:'e.g. Ramesh Sharma',    p2:'e.g. Hotel Grand',       serviceLabel:'Catering & Cuisine' },
+  corporate: { title:'✦ Step 2 — Corporate Event Details',       evTitle:'✦ Step 3 — Event Schedule',      l1:'Company / Organiser', l2:'Contact Person',      l3:'Department',        l4:'Sponsor / Partner', l5:'Event Date',      p1:'e.g. ABC Enterprises',  p2:'e.g. Rohit Verma',       serviceLabel:'Corporate Event' },
+  social:    { title:'✦ Step 2 — Social Celebration Details',    evTitle:'✦ Step 3 — Programme',           l1:'Host Name',           l2:'Co-host Name',        l3:"Host's Family",     l4:"Co-host's Family",  l5:'Celebration Date',p1:'e.g. Priya Mehta',      p2:'e.g. Rahul Mehta',       serviceLabel:'Social Celebration' },
+  lawn:      { title:'✦ Step 2 — Open Lawn Event Details',       evTitle:'✦ Step 3 — Event Schedule',      l1:'Host Name',           l2:'Co-host Name',        l3:"Host's Family",     l4:"Co-host's Family",  l5:'Event Date',      p1:'e.g. Vikram Joshi',     p2:'e.g. Neha Joshi',        serviceLabel:'Open Lawn Event' },
+};
+
+let currentInvType = 'wedding';
+
+function selectInvType(type) {
+  currentInvType = type;
+  const meta = INV_TYPE_META[type] || INV_TYPE_META.wedding;
+
+  // Update button styles
+  ['wedding','reception','catering','corporate','social','lawn'].forEach(function(k) {
+    var btn = document.getElementById('invtype_'+k);
+    if(!btn) return;
+    if(k === type) {
+      btn.classList.add('inv-type-active');
+    } else {
+      btn.classList.remove('inv-type-active');
+    }
+  });
+
+  // Update section titles
+  var ft = document.getElementById('invFormTitle');
+  if(ft) ft.textContent = meta.title;
+  var et = document.getElementById('invEventsTitle');
+  if(et) et.textContent = meta.evTitle;
+
+  // Update field labels and placeholders
+  var el = function(id){ return document.getElementById(id); };
+  if(el('invLabel1')) el('invLabel1').textContent = meta.l1;
+  if(el('invLabel2')) el('invLabel2').textContent = meta.l2;
+  if(el('invLabel3')) el('invLabel3').textContent = meta.l3;
+  if(el('invLabel4')) el('invLabel4').textContent = meta.l4;
+  if(el('invLabel5')) el('invLabel5').textContent = meta.l5;
+  if(el('inv_bride')) el('inv_bride').placeholder = meta.p1;
+  if(el('inv_groom')) el('inv_groom').placeholder = meta.p2;
+
+  // Update hidden service type
+  if(el('inv_service_type')) el('inv_service_type').value = type;
+
+  autoSlug();
+}
 
 function autoSlug() {
   const bride = document.getElementById('inv_bride')?.value.trim().split(' ')[0].toLowerCase() || '';
@@ -1628,121 +1695,106 @@ async function createInvitation() {
 async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, address, mapLink, message, events, theme, slug, cardLang, serviceLabel, tok }) {
   try {
     const themes = {
-      royal:    { bg:[13,10,5],    accent:[201,168,76],  accent2:[232,201,122], text:[247,240,224], textm:[212,196,160] },
-      floral:   { bg:[26,10,15],   accent:[232,160,180], accent2:[245,198,212], text:[255,240,243], textm:[212,160,176] },
-      emerald:  { bg:[5,15,10],    accent:[76,175,130],  accent2:[126,203,159], text:[240,255,245], textm:[160,196,176] },
-      midnight: { bg:[5,8,20],     accent:[123,159,232], accent2:[168,192,245], text:[240,244,255], textm:[160,174,212] },
-      rose:     { bg:[18,10,12],   accent:[212,144,122], accent2:[232,180,160], text:[255,245,242], textm:[196,160,152] },
+      royal:    { bg:'#0D0A05', accent:'#C9A84C', accent2:'#E8C97A', text:'#F7F0E0', textm:'#D4C4A0' },
+      floral:   { bg:'#1A0A0F', accent:'#E8A0B4', accent2:'#F5C6D4', text:'#FFF0F3', textm:'#D4A0B0' },
+      emerald:  { bg:'#050F0A', accent:'#4CAF82', accent2:'#7ECB9F', text:'#F0FFF5', textm:'#A0C4B0' },
+      midnight: { bg:'#050814', accent:'#7B9FE8', accent2:'#A8C0F5', text:'#F0F4FF', textm:'#A0AED4' },
+      rose:     { bg:'#120A0C', accent:'#D4907A', accent2:'#E8B4A0', text:'#FFF5F2', textm:'#C4A098' },
     };
-    const t = themes[theme] || themes.royal;
-    const C = t.accent, C2 = t.accent2, BG = t.bg, TX = t.text, TM = t.textm;
-
-    // Build PDF as raw content using minimal PDF spec
-    // We'll use a simple canvas-based approach via an offscreen iframe
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:794px;height:1123px;border:none;';
-    document.body.appendChild(iframe);
-
+    const th = themes[theme] || themes.royal;
+    const bg = th.bg, ac = th.accent, ac2 = th.accent2, tx = th.text, tm = th.textm;
     const fontMain = theme==='midnight'?'Josefin Sans':theme==='floral'?'Playfair Display':'Cinzel';
-    const accentHex = '#'+C.map(function(v){return v.toString(16).padStart(2,'0');}).join('');
-    const accent2Hex = '#'+C2.map(function(v){return v.toString(16).padStart(2,'0');}).join('');
-    const bgHex = '#'+BG.map(function(v){return v.toString(16).padStart(2,'0');}).join('');
-    const txHex = '#'+TX.map(function(v){return v.toString(16).padStart(2,'0');}).join('');
-    const tmHex = '#'+TM.map(function(v){return v.toString(16).padStart(2,'0');}).join('');
 
     var evRows = events.filter(function(e){return e.name||e.nameLocal;}).map(function(ev){
       var evDate = ev.date ? new Date(ev.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) : '';
       var evTime = ev.time ? new Date('2000-01-01T'+ev.time).toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true}) : '';
-      return '<tr style="border-bottom:1px solid rgba(255,255,255,0.06);">'
-        +'<td style="padding:8px 10px;font-size:11px;color:'+accentHex+';white-space:nowrap;">'+evDate+'</td>'
-        +'<td style="padding:8px 10px;font-size:12px;color:'+txHex+';">'+(ev.nameLocal||ev.name||'')+'<br><span style="font-size:10px;color:'+tmHex+';">'+(ev.name||'')+'</span></td>'
-        +'<td style="padding:8px 10px;font-size:11px;color:'+accentHex+';white-space:nowrap;">'+evTime+'</td>'
+      return '<tr>'
+        +'<td style="padding:8px 10px;font-size:11px;color:'+ac+';white-space:nowrap;border-bottom:1px solid rgba(255,255,255,0.06);">'+evDate+'</td>'
+        +'<td style="padding:8px 10px;font-size:12px;color:'+tx+';border-bottom:1px solid rgba(255,255,255,0.06);">'
+          +(ev.nameLocal||ev.name||'')
+          +(ev.name&&ev.nameLocal&&ev.name!==ev.nameLocal?'<br><span style="font-size:10px;color:'+tm+';">'+ev.name+'</span>':'')
+        +'</td>'
+        +'<td style="padding:8px 10px;font-size:11px;color:'+ac+';white-space:nowrap;border-bottom:1px solid rgba(255,255,255,0.06);">'+evTime+'</td>'
         +'</tr>';
     }).join('');
 
-    var pdfContent = '<!DOCTYPE html><html><head>'
-      +'<meta charset="UTF-8"/>'
+    // Build fully inline PDF page — NO CSS classes, all inline styles
+    // This ensures colours render correctly in every browser's Print > Save as PDF
+    var S = {
+      page:   'width:210mm;min-height:297mm;padding:12mm 14mm;background-color:'+bg+';-webkit-print-color-adjust:exact;print-color-adjust:exact;',
+      outer:  'border:2px solid '+ac+';padding:8mm;position:relative;background-color:'+bg+';min-height:260mm;',
+      inner:  'border:1px solid rgba(255,255,255,0.10);padding:7mm;background-color:'+bg+';',
+      eyebrow:'font-size:9pt;letter-spacing:4px;text-transform:uppercase;color:'+ac+';text-align:center;display:block;margin-bottom:14px;font-family:'+fontMain+',serif;',
+      name:   'font-family:'+fontMain+',serif;font-size:28pt;text-align:center;color:'+tx+';line-height:1.1;font-weight:700;',
+      weds:   'font-size:9pt;letter-spacing:4px;text-transform:uppercase;color:'+ac+';text-align:center;margin:8px 0;',
+      divider:'width:80px;height:2px;background-color:'+ac+';margin:12px auto;',
+      datebox:'display:inline-block;border:1px solid '+ac+';padding:6px 18px;font-size:9pt;letter-spacing:2px;text-transform:uppercase;color:'+ac2+';background-color:'+bg+';',
+      venue:  'font-style:italic;font-size:11pt;color:'+tm+';text-align:center;margin-top:6px;',
+      msg:    'font-style:italic;font-size:10pt;color:'+tm+';line-height:1.7;text-align:center;margin:12px auto;max-width:140mm;',
+      sTitle: 'font-family:'+fontMain+',serif;font-size:8pt;letter-spacing:3px;text-transform:uppercase;color:'+ac+';text-align:center;margin:16px 0 10px;',
+      vbox:   'border:1px solid rgba(255,255,255,0.12);padding:10px;background-color:rgba(255,255,255,0.02);margin-top:10px;text-align:center;',
+      vname:  'font-family:'+fontMain+',serif;font-size:12pt;color:'+tx+';',
+      vaddr:  'font-size:9pt;color:'+tm+';margin-top:4px;line-height:1.5;',
+      fcard:  'border:1px solid rgba(255,255,255,0.10);padding:10px;text-align:center;background-color:'+bg+';',
+      frole:  'font-size:7pt;letter-spacing:2px;text-transform:uppercase;color:'+ac+';margin-bottom:4px;',
+      fname:  'font-family:'+fontMain+',serif;font-size:11pt;color:'+tx+';',
+      footer: 'text-align:center;margin-top:14px;padding-top:10px;border-top:1px solid rgba(255,255,255,0.08);font-size:7pt;color:rgba(255,255,255,0.4);letter-spacing:1.5px;text-transform:uppercase;',
+    };
+
+    var pdfContent = '<!DOCTYPE html>'
+      +'<html><head><meta charset="UTF-8"/>'
+      +'<title>'+bride+' — '+groom+' · Invitation</title>'
       +'<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=Playfair+Display:wght@400;700&family=Josefin+Sans:wght@300;600&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet"/>'
       +'<style>'
-      +'*{margin:0;padding:0;box-sizing:border-box;}'
-      +'body{background:'+bgHex+';color:'+txHex+';font-family:"Cormorant Garamond",serif;width:794px;min-height:1123px;}'
-      +'.page{padding:48px 56px;}'
-      +'.border-outer{border:2px solid '+accentHex+';padding:32px;position:relative;min-height:1027px;}'
-      +'.border-inner{border:1px solid rgba(255,255,255,0.08);padding:28px;}'
-      +'.corner{position:absolute;width:30px;height:30px;border-color:'+accentHex+';border-style:solid;}'
-      +'.tl{top:-2px;left:-2px;border-width:3px 0 0 3px;} .tr{top:-2px;right:-2px;border-width:3px 3px 0 0;}'
-      +'.bl{bottom:-2px;left:-2px;border-width:0 0 3px 3px;} .br{bottom:-2px;right:-2px;border-width:0 3px 3px 0;}'
-      +'.emoji{font-size:36px;text-align:center;display:block;margin-bottom:12px;}'
-      +'.eyebrow{font-size:9px;letter-spacing:4px;text-transform:uppercase;color:'+accentHex+';text-align:center;margin-bottom:14px;}'
-      +'.bride,.groom{font-family:"'+fontMain+'",serif;font-size:clamp(22px,4vw,34px);text-align:center;color:'+txHex+';line-height:1.1;}'
-      +'.weds{font-size:11px;letter-spacing:4px;text-transform:uppercase;color:'+accentHex+';text-align:center;margin:8px 0;}'
-      +'.divider{width:80px;height:1px;background:linear-gradient(90deg,transparent,'+accentHex+',transparent);margin:14px auto;}'
-      +'.date-box{text-align:center;border:1px solid rgba(255,255,255,0.1);padding:8px 20px;display:inline-block;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:'+accent2Hex+';}'
-      +'.venue-line{font-style:italic;font-size:13px;color:'+tmHex+';text-align:center;margin-top:6px;}'
-      +'.message{font-style:italic;font-size:12px;color:'+tmHex+';line-height:1.8;text-align:center;margin:16px 0;max-width:500px;margin-left:auto;margin-right:auto;}'
-      +'.section-title{font-family:"'+fontMain+'",serif;font-size:10px;letter-spacing:3px;text-transform:uppercase;color:'+accentHex+';text-align:center;margin:20px 0 12px;}'
-      +'.ev-table{width:100%;border-collapse:collapse;}'
-      +'.venue-box{border:1px solid rgba(255,255,255,0.08);padding:14px;background:rgba(255,255,255,0.02);margin-top:12px;text-align:center;}'
-      +'.venue-name{font-family:"'+fontMain+'",serif;font-size:14px;color:'+txHex+';}'
-      +'.venue-addr{font-size:10px;color:'+tmHex+';margin-top:4px;line-height:1.5;}'
-      +'.families{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;}'
-      +'.fam-card{border:1px solid rgba(255,255,255,0.06);padding:12px;text-align:center;}'
-      +'.fam-role{font-size:8px;letter-spacing:2px;text-transform:uppercase;color:'+accentHex+';margin-bottom:4px;}'
-      +'.fam-name{font-family:"'+fontMain+'",serif;font-size:13px;color:'+txHex+';}'
-      +'.footer{text-align:center;margin-top:20px;padding-top:14px;border-top:1px solid rgba(255,255,255,0.06);font-size:9px;color:rgba(255,255,255,0.3);letter-spacing:1.5px;text-transform:uppercase;}'
-      +'@media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}'
-      +'</style></head><body>'
-      +'<div class="page"><div class="border-outer">'
-      +'<div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>'
-      +'<div class="border-inner">'
-      +(serviceLabel?'<div style="text-align:center;font-size:9px;letter-spacing:3px;text-transform:uppercase;color:'+accentHex+';margin-bottom:10px;">'+serviceLabel+'</div>':'')
-      +'<span class="eyebrow">✦ Auspicious Wedding Invitation ✦</span>'
-      +'<div class="bride">'+bride+'</div>'
-      +'<div class="weds">♥ weds ♥</div>'
-      +'<div class="groom">'+groom+'</div>'
-      +'<div class="divider"></div>'
-      +'<div style="text-align:center;"><span class="date-box">📅 '+dateStr+(timeStr?' · '+timeStr:'')+'</span></div>'
-      +'<div class="venue-line">📍 '+venue+'</div>'
-      +'<p class="message">'+message.slice(0,200)+'</p>'
-      +(evRows?'<div class="section-title">Wedding Events</div><table class="ev-table">'+evRows+'</table>':'')
-      +'<div class="section-title">Venue</div>'
-      +'<div class="venue-box"><div class="venue-name">'+venue+'</div><div class="venue-addr">'+address+'</div>'
-      +(mapLink?'<div style="font-size:9px;color:'+accentHex+';margin-top:6px;">'+mapLink+'</div>':'')
+        +'*{margin:0;padding:0;box-sizing:border-box;}'
+        +'@page{size:A4;margin:0;}'
+        +'html{background-color:'+bg+';}'
+        +'body{font-family:"Cormorant Garamond",serif;background-color:'+bg+';color:'+tx+';-webkit-print-color-adjust:exact;print-color-adjust:exact;color-adjust:exact;}'
+        +'@media print{'
+        +'  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;}'
+        +'  html,body{background-color:'+bg+'!important;}'
+        +'}'
+      +'</style>'
+      +'</head>'
+      +'<body style="background-color:'+bg+';margin:0;">'
+      +'<div style="'+S.page+'">'
+        +'<div style="'+S.outer+'">'
+          // corner decorations
+          +'<div style="position:absolute;top:-2px;left:-2px;width:28px;height:28px;border-top:3px solid '+ac+';border-left:3px solid '+ac+';"></div>'
+          +'<div style="position:absolute;top:-2px;right:-2px;width:28px;height:28px;border-top:3px solid '+ac+';border-right:3px solid '+ac+';"></div>'
+          +'<div style="position:absolute;bottom:-2px;left:-2px;width:28px;height:28px;border-bottom:3px solid '+ac+';border-left:3px solid '+ac+';"></div>'
+          +'<div style="position:absolute;bottom:-2px;right:-2px;width:28px;height:28px;border-bottom:3px solid '+ac+';border-right:3px solid '+ac+';"></div>'
+          +'<div style="'+S.inner+'">'
+            +(serviceLabel?'<p style="font-size:8pt;letter-spacing:3px;text-transform:uppercase;color:'+ac+';text-align:center;margin-bottom:8px;">'+serviceLabel+'</p>':'')
+            +'<span style="'+S.eyebrow+'">✦ Auspicious Invitation ✦</span>'
+            +'<div style="'+S.name+'">'+bride+'</div>'
+            +'<p style="'+S.weds+'">♥ weds ♥</p>'
+            +'<div style="'+S.name+'">'+groom+'</div>'
+            +'<div style="'+S.divider+'"></div>'
+            +'<div style="text-align:center;"><span style="'+S.datebox+'">📅 '+dateStr+(timeStr?' · '+timeStr:'')+'</span></div>'
+            +'<p style="'+S.venue+'">📍 '+venue+'</p>'
+            +'<p style="'+S.msg+'">'+message.slice(0,220)+'</p>'
+            +(evRows
+              ?'<p style="'+S.sTitle+'">Events &amp; Programme</p>'
+               +'<table style="width:100%;border-collapse:collapse;">'+evRows+'</table>'
+              :'')
+            +'<p style="'+S.sTitle+'">Venue</p>'
+            +'<div style="'+S.vbox+'">'
+              +'<div style="'+S.vname+'">'+venue+'</div>'
+              +'<div style="'+S.vaddr+'">'+address+'</div>'
+              +(mapLink?'<div style="font-size:8pt;color:'+ac+';margin-top:5px;">'+mapLink+'</div>':'')
+            +'</div>'
+            +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">'
+              +'<div style="'+S.fcard+'"><div style="'+S.frole+'">Primary Host</div><div style="'+S.fname+'">'+bride+'</div></div>'
+              +'<div style="'+S.fcard+'"><div style="'+S.frole+'">Co-host</div><div style="'+S.fname+'">'+groom+'</div></div>'
+            +'</div>'
+            +'<div style="'+S.footer+'">Hosted at Krishnam Lawns &amp; Banquets · Nagpur · +91 88888 83587</div>'
+          +'</div>'
+        +'</div>'
       +'</div>'
-      +'<div class="families">'
-      +'<div class="fam-card"><div class="fam-role">Bride\'s Family</div><div class="fam-name">'+(bride.split(' ').slice(-1)[0]+' Family')+'</div></div>'
-      +'<div class="fam-card"><div class="fam-role">Groom\'s Family</div><div class="fam-name">'+(groom.split(' ').slice(-1)[0]+' Family')+'</div></div>'
-      +'</div>'
-      +'<div class="footer">Hosted at Krishnam Lawns &amp; Banquets · Nagpur</div>'
-      +'</div></div></div>'
       +'</body></html>';
 
-    // Write into iframe and print to PDF via canvas
-    iframe.contentDocument.open();
-    iframe.contentDocument.write(pdfContent);
-    iframe.contentDocument.close();
-
-    // Wait for fonts to load then capture as image via canvas
-    await new Promise(function(resolve){ setTimeout(resolve, 2000); });
-
-    // Use html2canvas approach via the iframe
-    var iDoc = iframe.contentDocument;
-    var iBody = iDoc.body;
-
-    // Serialize the rendered HTML and upload as a self-contained PDF-like HTML
-    // Since we can't use jsPDF without CDN, we store a print-ready HTML as .pdf named file
-    // and also provide a proper download link
-    var pdfHtml = '<!DOCTYPE html><html><head><meta charset="UTF-8"/>'
-      +'<title>'+bride+' weds '+groom+' - Wedding Invitation</title>'
-      +'<style>@page{size:A4;margin:0;}@media print{body{margin:0;-webkit-print-color-adjust:exact;print-color-adjust:exact;}}</style>'
-      +'</head><body onload="window.print()">'+pdfContent.replace(/<!DOCTYPE html>[\s\S]*?<body[^>]*>/,'').replace(/<\/body>[\s\S]*$/,'')+'</body></html>';
-
-    // Actually generate a proper PDF blob using browser print API captured in canvas
-    // For GitHub hosting, we upload a print-ready HTML with .html extension named as pdf-slug
-    var pdfSlugName = slug+'-printable';
-
     var pdfBody = { message:'Create printable invitation: '+slug, branch:GH_BRANCH, content:btoa(unescape(encodeURIComponent(pdfContent))) };
-    // Check for existing
     try {
       var er = await fetch(API_BASE+'/'+INV_FOLDER+'/'+slug+'.pdf.html?ref='+GH_BRANCH);
       if(er.ok){ var ef = await er.json(); pdfBody.sha = ef.sha; }
@@ -1752,8 +1804,6 @@ async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, 
       method:'PUT', headers:{Authorization:'Bearer '+tok,'Content-Type':'application/json'},
       body:JSON.stringify(pdfBody)
     });
-
-    document.body.removeChild(iframe);
   } catch(e) {
     console.warn('PDF generation error:', e);
   }
