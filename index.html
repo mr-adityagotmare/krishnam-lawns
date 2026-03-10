@@ -1781,58 +1781,7 @@ async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, 
     const bg = th.bg, ac = th.accent, ac2 = th.accent2, tx = th.text, tm = th.textm;
     const fontMain = theme==='midnight'?'Josefin Sans':theme==='floral'?'Playfair Display':'Cinzel';
 
-    // ── Inline QR SVG generator (no external library, no network call) ────
-    function makeQRSvg(text, size, fgColor, bgColor) {
-      // Uses QR Code version 3, error correction L — good for short URLs (~90 chars max)
-      // For longer URLs falls back to a simple data-matrix pattern with the URL as text
-      try {
-        // We embed a tiny self-contained QR script directly in the PDF HTML
-        // and render it via canvas → data URL at runtime in the PDF page itself
-        return null; // signal: use script-based approach
-      } catch(e){ return null; }
-    }
-
     var onlineUrl = 'https://'+GH_USER+'.github.io/'+GH_REPO+'/'+INV_FOLDER+'/'+slug+'.html';
-
-    // ── Fully self-contained QR generator — NO CDN, NO network, works offline ──
-    // Generates a QR SVG string directly in JS at invite-publish time.
-    // Uses QR Version 3 (29×29) with error correction level M — handles URLs up to ~90 chars.
-    function makeQRSvg(text, fg, bg2) {
-      // Reed-Solomon GF(256) with primitive polynomial x^8+x^4+x^3+x^2+1 = 285
-      var GF_EXP = new Uint8Array(512), GF_LOG = new Uint8Array(256);
-      (function(){var x=1;for(var i=0;i<255;i++){GF_EXP[i]=x;GF_LOG[x]=i;x<<=1;if(x&256)x^=285;x&=255;}for(var i=255;i<512;i++)GF_EXP[i]=GF_EXP[i-255];})();
-      function gmul(a,b){if(a===0||b===0)return 0;return GF_EXP[(GF_LOG[a]+GF_LOG[b])%255];}
-      function genpoly(n){var p=[1];for(var i=0;i<n;i++){var q=[1,GF_EXP[i]];var r=new Array(p.length+1).fill(0);for(var j=0;j<p.length;j++)for(var k=0;k<q.length;k++)r[j+k]^=gmul(p[j],q[k]);p=r;}return p;}
-      function rsdiv(data,poly){var res=data.slice();for(var i=0;i<data.length;i++){var c=res[i];if(c!==0)for(var j=1;j<poly.length;j++)res[i+j]^=gmul(poly[j],c);}return res.slice(data.length);}
-
-      // Encode text as byte mode
-      var bytes=[];for(var i=0;i<text.length;i++)bytes.push(text.charCodeAt(i)&0xFF);
-      var n=bytes.length;
-
-      // Version 3, M: 26 data codewords, 2 blocks of 13 data + 8 EC each (actually v3-M = 44 data codewords total, 26 capacity for bytes)
-      // We'll use version 3 (44 data + 26 EC codewords, capacity 47 bytes mode byte)
-      // Simplified: encode into bit stream
-      var bits=[];
-      function pushBits(val,len){for(var i=len-1;i>=0;i--)bits.push((val>>i)&1);}
-      pushBits(4,4); // byte mode indicator
-      pushBits(n,8); // character count
-      for(var i=0;i<n;i++) pushBits(bytes[i],8);
-      pushBits(0,4); // terminator
-      // Pad to 8-bit boundary
-      while(bits.length%8!==0) bits.push(0);
-      // Convert to codewords
-      var cw=[];
-      for(var i=0;i<bits.length;i+=8){var b=0;for(var j=0;j<8;j++)b=(b<<1)|bits[i+j];cw.push(b);}
-      // Pad codewords to 44
-      var PAD=[236,17],pi=0;while(cw.length<44)cw.push(PAD[pi++%2]);
-      // EC: version 3M = 2 blocks, each block: 11 data cw + 22 ec (total 44 data, 44 ec) — 
-      // Actually v3M: 2 EC blocks of 22 codewords each from 22 data codewords each
-      // Let's use v2M instead: 1 block, 16 data codewords + 10 EC — capacity 28 bytes OK for our URLs ~55 chars
-      // Recalculate for v2M:
-      // ... This is getting complex. Use a lookup-table approach with precomputed format/version bits.
-      // FALLBACK: use a reliable minimal QR implementation via canvas data URL.
-      return null; // signal to use canvas fallback
-    }
 
     // ── Self-contained QR generator (no CDN, no network) ─────────────────────
     // Generates QR at publish time in admin browser → saved as inline SVG data URL in PDF
@@ -1978,7 +1927,7 @@ async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, 
     // Events table: ~30px per row
     // QR section: ~180px
     var estimatedPx = 580 + (evCount * 30) + (msgLen > 100 ? 40 : 0);
-    var canFitQR = (estimatedPx + 180) < 890;
+    var canFitQR = true; // always show QR — it's essential for guests to reach the digital invite
 
     var evRows = events.filter(function(e){return e.name||e.nameLocal;}).map(function(ev){
       var evDate = ev.date ? new Date(ev.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) : '';
@@ -2058,13 +2007,27 @@ async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, 
       +'<span style="position:absolute;bottom:5px;right:24px;font-size:13px;opacity:0.20;line-height:1;transform:rotate(15deg);pointer-events:none;">'+petalEmoji+'</span>';
 
     // QR section HTML — uses pre-generated inline SVG data URL (no CDN, no network, always works)
-    var qrSection = (canFitQR && qrDataUrl)
-      ? '<div style="margin-top:10px;text-align:center;">'
-          +'<img src="'+qrDataUrl+'" width="120" height="120" style="display:block;margin:0 auto;border:2px solid '+ac+';padding:5px;background-color:'+bg+';-webkit-print-color-adjust:exact;print-color-adjust:exact;" alt="QR Code"/>'
-          +'<p style="margin-top:6px;font-size:7pt;letter-spacing:1.5px;color:'+ac+';text-transform:uppercase;font-family:'+fontMain+',serif;">'+petalEmoji+' Scan for Digital Invitation &amp; Location '+petalEmoji+'</p>'
-          +'<p style="font-size:6.5pt;color:'+tm+';margin-top:2px;font-style:italic;">For more details and location, scan the QR code above</p>'
+    var qrSection = qrDataUrl
+      ? '<div style="margin-top:12px;border-top:1px solid rgba(255,255,255,0.08);padding-top:12px;">'
+          +'<div style="display:grid;grid-template-columns:auto 1fr;gap:14px;align-items:center;">'
+            +'<div>'
+              +'<img src="'+qrDataUrl+'" width="100" height="100" style="display:block;border:1.5px solid '+ac+';padding:4px;background-color:'+bg+';-webkit-print-color-adjust:exact;print-color-adjust:exact;" alt="QR Code"/>'
+            +'</div>'
+            +'<div>'
+              +'<p style="font-size:7.5pt;font-weight:700;letter-spacing:1.5px;color:'+ac+';text-transform:uppercase;font-family:'+fontMain+',serif;margin-bottom:4px;">'+petalEmoji+' Digital Invitation</p>'
+              +'<p style="font-size:6.5pt;color:'+tm+';line-height:1.6;margin-bottom:6px;">Scan to open the digital invite — includes live countdown, full event schedule & location map.</p>'
+              +'<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:6px;">'
+                +'<p style="font-size:6pt;color:'+ac+';letter-spacing:0.08em;">✦ Venue Partner</p>'
+                +'<p style="font-size:7pt;font-family:'+fontMain+',serif;color:'+tx+';margin-top:2px;">Krishnam Lawns &amp; Banquets</p>'
+                +'<p style="font-size:5.5pt;color:'+tm+';margin-top:1px;">Hudkeshwar, Nagpur · +91 88888 83587</p>'
+              +'</div>'
+            +'</div>'
+          +'</div>'
         +'</div>'
-      : '';
+      : '<div style="margin-top:12px;border-top:1px solid rgba(255,255,255,0.08);padding-top:10px;text-align:center;">'
+          +'<p style="font-size:6pt;color:'+ac+';letter-spacing:0.08em;">✦ Venue Partner</p>'
+          +'<p style="font-size:7pt;font-family:'+fontMain+',serif;color:'+tx+';margin-top:2px;">Krishnam Lawns &amp; Banquets, Hudkeshwar, Nagpur</p>'
+        +'</div>';
 
     var pdfContent = '<!DOCTYPE html>'
       +'<html><head><meta charset="UTF-8"/>'
@@ -2113,7 +2076,7 @@ async function generateAndUploadInvPDF({ bride, groom, dateStr, timeStr, venue, 
               +'<div style="'+S.fcard+'"><div style="'+S.frole+'">Primary Host</div><div style="'+S.fname+'">'+bride+'</div></div>'
               +'<div style="'+S.fcard+'"><div style="'+S.frole+'">Co-host</div><div style="'+S.fname+'">'+groom+'</div></div>'
             +'</div>'
-            +'<div style="'+S.footer+'">'+petalEmoji2+' Hosted at Krishnam Lawns &amp; Banquets · Nagpur · +91 88888 83587 '+petalEmoji2+'</div>'
+            +'<div style="'+S.footer+'">'+petalEmoji2+' Krishnam Lawns &amp; Banquets · Hudkeshwar, Nagpur · ☎ +91 88888 83587 '+petalEmoji2+'<br><span style="font-size:5pt;opacity:0.6;letter-spacing:0.08em;">Nagpur\'s Premier Wedding &amp; Banquet Venue · Open Lawn · Catering · Corporate Events</span></div>'
           +'</div>'
         +'</div>'
       +'</div>'
@@ -2199,8 +2162,9 @@ function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr,
     '<meta charset="UTF-8"/>',
     '<meta name="viewport" content="width=device-width,initial-scale=1"/>',
     '<title>'+bride+' weds '+groom+' | '+dateStr+'</title>',
-    '<meta property="og:title" content="Wedding Invitation | '+bride+' weds '+groom+'"/>',
-    '<meta property="og:description" content="'+message.slice(0,120)+'"/>',
+    '<meta property="og:title" content="'+bride+' weds '+groom+' | '+dateStr+'"/>',
+    '<meta property="og:description" content="'+message.slice(0,120)+' · Venue: Krishnam Lawns &amp; Banquets, Nagpur"/>',
+    '<meta property="og:site_name" content="Krishnam Lawns &amp; Banquets — Nagpur"/>',
     '<link href="https://fonts.googleapis.com/css2?family='+t.font+'&family='+t.bodyFont+'&family=Raleway:wght@300;400;600&display=swap" rel="stylesheet"/>',
     '<style>',
     '*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}',
@@ -2253,6 +2217,13 @@ function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr,
     '.inv-footer small{font-size:0.58rem;letter-spacing:0.2em;text-transform:uppercase;color:rgba(255,255,255,0.2);}',
     '.venue-logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:20px;}',
     '.venue-logo span{font-family:"'+fontMain+'",serif;font-size:0.8rem;letter-spacing:0.2em;color:var(--accent);}',
+    '.venue-brand-card{border:1px solid rgba(255,255,255,0.06);padding:20px;margin:24px auto 0;max-width:400px;background:var(--pat);text-align:center;}',
+    '.venue-brand-title{font-family:"'+fontMain+'",serif;font-size:0.95rem;letter-spacing:0.18em;color:var(--accent);margin-bottom:6px;}',
+    '.venue-brand-sub{font-size:0.65rem;letter-spacing:0.2em;text-transform:uppercase;color:var(--textm);margin-bottom:12px;}',
+    '.venue-brand-contact{font-size:0.72rem;color:var(--textm);line-height:1.8;}',
+    '.venue-brand-contact a{color:var(--accent);text-decoration:none;}',
+    '.venue-services{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:10px;}',
+    '.venue-service-tag{font-size:0.55rem;letter-spacing:0.18em;text-transform:uppercase;border:1px solid rgba(255,255,255,0.1);padding:4px 10px;color:var(--textm);}',
     '.rings{position:fixed;pointer-events:none;z-index:1;}',
     '.rings.top-left{top:-80px;left:-80px;} .rings.bot-right{bottom:-80px;right:-80px;}',
     '.ring-dec{position:absolute;border-radius:50%;border:1px solid;}',
@@ -2301,7 +2272,21 @@ function buildInvitationHTML({ bride, groom, brideFam, groomFam, wDate, dateStr,
     '  <div class="inv-footer">',
     '    <p>Join us and share in our joy 💕</p>',
     '    <p>We look forward to celebrating with you!</p>',
-    '    <div class="venue-logo"><span>Hosted at Krishnam Lawns &amp; Banquets</span></div>',
+    '    <div class="venue-brand-card">',
+    '      <div class="venue-brand-title">Krishnam Lawns &amp; Banquets</div>',
+    '      <div class="venue-brand-sub">Hudkeshwar, Nagpur · Nagpur\'s Premier Venue</div>',
+    '      <div class="venue-services">',
+    '        <span class="venue-service-tag">Wedding Ceremonies</span>',
+    '        <span class="venue-service-tag">Reception &amp; Party</span>',
+    '        <span class="venue-service-tag">Open Lawn</span>',
+    '        <span class="venue-service-tag">Catering</span>',
+    '        <span class="venue-service-tag">Corporate Events</span>',
+    '      </div>',
+    '      <div class="venue-brand-contact" style="margin-top:12px;">',
+    '        <a href="tel:+918888883587">+91 88888 83587</a> &nbsp;·&nbsp;',
+    '        <a href="https://maps.app.goo.gl/iyjcCS83y51dXh7p7" target="_blank">Get Directions ↗</a>',
+    '      </div>',
+    '    </div>',
     '    <br><small>This invitation expires on '+expiryStr+'</small>',
     '  </div>',
     '</div>',
